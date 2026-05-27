@@ -7,6 +7,7 @@ import { generateMemorySuggestionsFromConversation, getMemory } from "../api/mem
 import { getProjects } from "../api/projects.api";
 import type { ChatMessage, ConversationItem, ConversationSummary, ProjectItem } from "../types/api";
 import { formatDate } from "../utils/formatDate";
+import { labelMemoryType, labelSummaryStatus } from "../utils/labels";
 
 const DEFAULT_TOP_K = 5;
 
@@ -15,7 +16,7 @@ type BusyState = "boot" | "conversations" | "messages" | "send" | "summary" | "s
 function sourceSummary(text: string) {
   const compact = text.replace(/\s+/g, " ").trim();
   if (!compact) {
-    return "Source excerpt";
+    return "来源摘录";
   }
   return compact.length > 42 ? `${compact.slice(0, 42).trim()}...` : compact;
 }
@@ -78,7 +79,7 @@ export function ChatPage() {
       await Promise.all([loadProjects(), loadConversationList()]);
       setMessage(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to refresh chat data");
+      setMessage(error instanceof Error ? error.message : "刷新对话数据失败");
     } finally {
       setBusy(null);
     }
@@ -93,7 +94,7 @@ export function ChatPage() {
       setActiveConversation(response.data.conversation);
       setMessages(response.data.messages);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to load messages");
+      setMessage(error instanceof Error ? error.message : "消息加载失败");
     } finally {
       setBusy(null);
     }
@@ -117,7 +118,7 @@ export function ChatPage() {
   const ask = async () => {
     const cleanQuery = query.trim();
     if (!cleanQuery || busy === "send") {
-      setMessage("Question is required");
+      setMessage("请输入问题");
       return;
     }
 
@@ -154,7 +155,7 @@ export function ChatPage() {
               return;
             }
             if (event.event === "error") {
-              throw new Error(event.data.message ?? "Chat request failed");
+              throw new Error(event.data.message ?? "对话请求失败");
             }
           },
           signal: controller.signal,
@@ -162,9 +163,9 @@ export function ChatPage() {
       );
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        setMessage("Generation stopped. Partial answer was not saved.");
+        setMessage("已停止生成，未保存不完整回答。");
       } else {
-        setMessage(error instanceof Error ? error.message : "Chat request failed");
+        setMessage(error instanceof Error ? error.message : "对话请求失败");
       }
     } finally {
       if (abortRef.current === controller) {
@@ -186,7 +187,7 @@ export function ChatPage() {
       setCopiedKey(key);
       window.setTimeout(() => setCopiedKey((current) => (current === key ? null : current)), 1400);
     } catch {
-      setMessage("Copy failed");
+      setMessage("复制失败");
     }
   };
 
@@ -194,7 +195,7 @@ export function ChatPage() {
     if (!activeConversation || busy !== null) {
       return;
     }
-    const title = window.prompt("Rename conversation", activeConversation.title);
+    const title = window.prompt("重命名对话", activeConversation.title);
     if (title === null) {
       return;
     }
@@ -204,9 +205,9 @@ export function ChatPage() {
       const response = await updateConversationTitle(activeConversation.id, title);
       setActiveConversation(response.data);
       upsertConversation(response.data);
-      setMessage("Conversation renamed");
+      setMessage("对话已重命名");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Rename failed");
+      setMessage(error instanceof Error ? error.message : "重命名失败");
     } finally {
       setBusy(null);
     }
@@ -216,7 +217,7 @@ export function ChatPage() {
     if (!activeConversation || busy !== null) {
       return;
     }
-    const confirmed = window.confirm(`Delete conversation "${activeConversation.title}"? This removes its messages and summary.`);
+    const confirmed = window.confirm(`删除对话“${activeConversation.title}”？这会同时删除消息和摘要。`);
     if (!confirmed) {
       return;
     }
@@ -229,9 +230,9 @@ export function ChatPage() {
       setActiveConversation(null);
       setSummary(null);
       setMessages([]);
-      setMessage("Conversation deleted");
+      setMessage("对话已删除");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Delete failed");
+      setMessage(error instanceof Error ? error.message : "删除失败");
     } finally {
       setBusy(null);
     }
@@ -263,9 +264,9 @@ export function ChatPage() {
         return [...trimmed, response.data.assistant_message];
       });
       setSummary(response.data.summary ?? null);
-      setMessage("Response regenerated");
+      setMessage("回答已重新生成");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Regenerate failed");
+      setMessage(error instanceof Error ? error.message : "重新生成失败");
     } finally {
       setBusy(null);
     }
@@ -279,9 +280,9 @@ export function ChatPage() {
     setMessage(null);
     try {
       const response = await generateMemorySuggestionsFromConversation(activeConversation.id, 5);
-      setMessage(`Generated ${response.data.total} pending work suggestion${response.data.total === 1 ? "" : "s"} for Memory review`);
+      setMessage(`已生成 ${response.data.total} 条待审核工作建议`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Suggestion generation failed");
+      setMessage(error instanceof Error ? error.message : "建议生成失败");
     } finally {
       setBusy(null);
     }
@@ -297,7 +298,7 @@ export function ChatPage() {
       const response = await generateConversationSummary(activeConversation.id);
       setSummary(response.data);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Summary request failed");
+      setMessage(error instanceof Error ? error.message : "摘要请求失败");
     } finally {
       setBusy(null);
     }
@@ -326,7 +327,7 @@ export function ChatPage() {
     } catch (error) {
       setSourceDetails((current) => ({
         ...current,
-        [sourceKey]: { loading: false, error: error instanceof Error ? error.message : "Failed to load chunk" },
+        [sourceKey]: { loading: false, error: error instanceof Error ? error.message : "切块加载失败" },
       }));
     }
   };
@@ -342,7 +343,7 @@ export function ChatPage() {
     } catch (error) {
       setSourceDetails((current) => ({
         ...current,
-        [sourceKey]: { loading: false, error: error instanceof Error ? error.message : "Failed to load memory" },
+        [sourceKey]: { loading: false, error: error instanceof Error ? error.message : "记忆加载失败" },
       }));
     }
   };
@@ -351,7 +352,7 @@ export function ChatPage() {
     setBusy("boot");
     void Promise.all([loadProjects(), loadConversationList()])
       .then(() => setMessage(null))
-      .catch((error) => setMessage(error instanceof Error ? error.message : "Failed to load chat data"))
+      .catch((error) => setMessage(error instanceof Error ? error.message : "对话数据加载失败"))
       .finally(() => setBusy(null));
   }, []);
 
@@ -365,20 +366,20 @@ export function ChatPage() {
         <div className="chat-history-header">
           <div>
             <strong>WorkMemory</strong>
-            <span>Local Chat</span>
+            <span>本地问答</span>
           </div>
-          <button className="icon-button small" type="button" onClick={startNewConversation} title="New conversation" disabled={busy === "send"}>
+          <button className="icon-button small" type="button" onClick={startNewConversation} title="新建对话" disabled={busy === "send"}>
             <MessageSquarePlus size={16} />
           </button>
         </div>
         <button className="secondary-button full-button" type="button" onClick={() => void refreshAll()} disabled={busy !== null}>
           <RefreshCw size={16} />
-          <span>{busy === "boot" || busy === "conversations" ? "Refreshing" : "Refresh"}</span>
+          <span>{busy === "boot" || busy === "conversations" ? "刷新中" : "刷新"}</span>
         </button>
-        <div className="conversation-section-label">Recent</div>
+        <div className="conversation-section-label">最近对话</div>
         <div className="conversation-list">
           {conversations.length === 0 ? (
-            <div className="empty-panel compact">No conversations yet</div>
+            <div className="empty-panel compact">还没有对话</div>
           ) : (
             conversations.map((conversation) => (
               <button
@@ -399,27 +400,27 @@ export function ChatPage() {
       <main className="chat-canvas">
         <header className="chat-topbar">
           <div>
-            <p className="eyebrow">Phase 13</p>
-            <h1>{activeConversation ? activeConversation.title : "New chat"}</h1>
+            <p className="eyebrow">RAG 问答</p>
+            <h1>{activeConversation ? activeConversation.title : "新对话"}</h1>
           </div>
           <div className="action-group">
             <button className={showSummary ? "secondary-button active" : "secondary-button"} type="button" onClick={() => setShowSummary((value) => !value)} disabled={!activeConversation}>
               <FileText size={16} />
-              <span>Summary</span>
+              <span>摘要</span>
             </button>
             <button className="secondary-button" type="button" onClick={() => void suggestMemories()} disabled={!activeConversation || busy !== null}>
               <Lightbulb size={16} />
-              <span>{busy === "suggestions" ? "Suggesting" : "Suggest"}</span>
+              <span>{busy === "suggestions" ? "建议生成中" : "生成建议"}</span>
             </button>
-            <button className="icon-button" type="button" onClick={() => void renameActiveConversation()} disabled={!activeConversation || busy !== null} title="Rename conversation">
+            <button className="icon-button" type="button" onClick={() => void renameActiveConversation()} disabled={!activeConversation || busy !== null} title="重命名对话">
               <Pencil size={16} />
             </button>
-            <button className="icon-button danger" type="button" onClick={() => void deleteActiveConversation()} disabled={!activeConversation || busy !== null} title="Delete conversation">
+            <button className="icon-button danger" type="button" onClick={() => void deleteActiveConversation()} disabled={!activeConversation || busy !== null} title="删除对话">
               <Trash2 size={16} />
             </button>
             <button className={showControls ? "secondary-button active" : "secondary-button"} type="button" onClick={() => setShowControls((value) => !value)}>
               <SlidersHorizontal size={16} />
-              <span>Options</span>
+              <span>选项</span>
             </button>
           </div>
         </header>
@@ -427,9 +428,9 @@ export function ChatPage() {
         {showControls ? (
           <div className="chat-options">
             <label>
-              <span>Project</span>
+              <span>项目</span>
               <select value={projectId} onChange={(event) => setProjectId(event.target.value)} disabled={busy === "send"}>
-                <option value="">All uploaded documents</option>
+                <option value="">全部已上传资料</option>
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.name}
@@ -438,29 +439,29 @@ export function ChatPage() {
               </select>
             </label>
             <label>
-              <span>Document ID</span>
-              <input value={documentId} onChange={(event) => setDocumentId(event.target.value)} placeholder="Optional exact document id" disabled={busy === "send"} />
+              <span>资料 ID</span>
+              <input value={documentId} onChange={(event) => setDocumentId(event.target.value)} placeholder="可选，精确资料 ID" disabled={busy === "send"} />
             </label>
             <label>
-              <span>Top K</span>
+              <span>返回数量</span>
               <input type="number" min={1} max={20} value={topK} onChange={(event) => setTopK(Number(event.target.value))} disabled={busy === "send"} />
             </label>
             <label>
-              <span>Memory</span>
+              <span>记忆</span>
               <select value={includeMemory ? "on" : "off"} onChange={(event) => setIncludeMemory(event.target.value === "on")} disabled={busy === "send"}>
-                <option value="off">Off</option>
-                <option value="on">On</option>
+                <option value="off">关闭</option>
+                <option value="on">开启</option>
               </select>
             </label>
             <label>
-              <span>Memory Limit</span>
+              <span>记忆数量</span>
               <input type="number" min={1} max={20} value={memoryLimit} onChange={(event) => setMemoryLimit(Number(event.target.value))} disabled={busy === "send" || !includeMemory} />
             </label>
             <label>
-              <span>Auto Summary</span>
+              <span>自动摘要</span>
               <select value={autoSummary ? "on" : "off"} onChange={(event) => setAutoSummary(event.target.value === "on")} disabled={busy === "send"}>
-                <option value="off">Off</option>
-                <option value="on">On</option>
+                <option value="off">关闭</option>
+                <option value="on">开启</option>
               </select>
             </label>
           </div>
@@ -469,38 +470,38 @@ export function ChatPage() {
         {showSummary && activeConversation ? (
           <section className="summary-drawer">
             <div className="chat-actions">
-              <span>Conversation Summary</span>
+              <span>对话摘要</span>
               <button className="secondary-button" type="button" onClick={() => void refreshSummary()} disabled={busy !== null}>
                 <FileText size={16} />
-                <span>{busy === "summary" ? "Generating" : summary ? "Refresh" : "Generate"}</span>
+                <span>{busy === "summary" ? "生成中" : summary ? "刷新" : "生成"}</span>
               </button>
             </div>
             {summary ? (
               <div className="summary-panel">
                 <dl>
-                  <dt>Status</dt>
-                  <dd>{summary.status}</dd>
-                  <dt>Generated</dt>
-                  <dd>{summary.generated_at ? formatDate(summary.generated_at) : "Not generated"}</dd>
-                  <dt>Coverage</dt>
+                  <dt>状态</dt>
+                  <dd>{labelSummaryStatus(summary.status)}</dd>
+                  <dt>生成时间</dt>
+                  <dd>{summary.generated_at ? formatDate(summary.generated_at) : "未生成"}</dd>
+                  <dt>覆盖范围</dt>
                   <dd>
-                    {summary.message_count} messages, {summary.stale ? "stale" : "current"}
+                    {summary.message_count} 条消息，{summary.stale ? "已过期" : "当前"}
                   </dd>
-                  <dt>New Messages</dt>
+                  <dt>新增消息</dt>
                   <dd>
-                    {summary.new_message_count}, {summary.needs_refresh ? "needs refresh" : "within threshold"}
+                    {summary.new_message_count} 条，{summary.needs_refresh ? "需要刷新" : "未达阈值"}
                   </dd>
                 </dl>
                 {summary.status === "failed" ? (
-                  <div className="inline-message">{summary.error_message ?? "Summary generation failed"}</div>
+                  <div className="inline-message">{summary.error_message ?? "摘要生成失败"}</div>
                 ) : summary.status === "missing" ? (
-                  <div className="empty-panel compact">No summary generated</div>
+                  <div className="empty-panel compact">还没有生成摘要</div>
                 ) : (
                   <p>{summary.summary}</p>
                 )}
               </div>
             ) : (
-              <div className="empty-panel compact">No summary generated</div>
+              <div className="empty-panel compact">还没有生成摘要</div>
             )}
           </section>
         ) : null}
@@ -509,20 +510,20 @@ export function ChatPage() {
 
         <div className="chat-thread" ref={threadRef}>
           {busy === "messages" ? (
-            <div className="empty-panel compact">Loading messages</div>
+            <div className="empty-panel compact">正在加载消息</div>
           ) : messages.length === 0 && !pendingPrompt ? (
             <div className="chat-empty-state">
-              <h2>Ask your indexed work knowledge base.</h2>
-              <p>Upload, parse, chunk, and index documents first. Then ask a question here.</p>
+              <h2>向已索引的工作知识库提问。</h2>
+              <p>先上传、解析、切块并索引资料，然后在这里提问。</p>
             </div>
           ) : (
             <>
               {messages.map((item) => (
                 <article className={item.role === "assistant" ? "chat-message assistant" : "chat-message user"} key={item.id}>
-                  <div className="chat-avatar">{item.role === "assistant" ? "AI" : "You"}</div>
+                  <div className="chat-avatar">{item.role === "assistant" ? "AI" : "我"}</div>
                   <div className="chat-message-body">
                     <div className="message-meta">
-                      <strong>{item.role === "assistant" ? "Assistant" : "You"}</strong>
+                      <strong>{item.role === "assistant" ? "助手" : "我"}</strong>
                       <span>{formatDate(item.created_at)}</span>
                     </div>
                     <p>{item.content}</p>
@@ -533,11 +534,11 @@ export function ChatPage() {
                     ) : null}
                     {item.role === "assistant" ? (
                       <div className="message-actions">
-                        <button className="icon-button small" type="button" title="Copy answer" onClick={() => void copyText(`answer:${item.id}`, item.content)}>
+                        <button className="icon-button small" type="button" title="复制回答" onClick={() => void copyText(`answer:${item.id}`, item.content)}>
                           {copiedKey === `answer:${item.id}` ? <Check size={15} /> : <Clipboard size={15} />}
                         </button>
                         {item.id === messages[messages.length - 1]?.id ? (
-                          <button className="icon-button small" type="button" title="Regenerate response" onClick={() => void regenerateLatest()} disabled={busy !== null || !activeConversation}>
+                          <button className="icon-button small" type="button" title="重新生成回答" onClick={() => void regenerateLatest()} disabled={busy !== null || !activeConversation}>
                             <RotateCcw size={15} />
                           </button>
                         ) : null}
@@ -560,7 +561,7 @@ export function ChatPage() {
                                     void loadChunkDetail(sourceKey, source.chunk_id);
                                   }
                                 }}
-                                title={`${source.source_filename} · chunk #${source.chunk_index} · score ${source.score.toFixed(4)}`}
+                                title={`${source.source_filename} · 切块 #${source.chunk_index} · 分数 ${source.score.toFixed(4)}`}
                               >
                                 {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                                 <strong>{source.source_id}：</strong>
@@ -569,24 +570,24 @@ export function ChatPage() {
                               {expanded ? (
                                 <div className="citation-detail">
                                   <dl>
-                                    <dt>File</dt>
+                                    <dt>文件</dt>
                                     <dd>{source.source_filename}</dd>
-                                    <dt>Project</dt>
-                                    <dd>{source.project_id ? projectNameById.get(source.project_id) ?? source.project_id : "Unfiled"}</dd>
-                                    <dt>Uploaded</dt>
+                                    <dt>项目</dt>
+                                    <dd>{source.project_id ? projectNameById.get(source.project_id) ?? source.project_id : "未归档"}</dd>
+                                    <dt>上传时间</dt>
                                     <dd>{formatDate(source.uploaded_at)}</dd>
-                                    <dt>Chunk</dt>
+                                    <dt>切块</dt>
                                     <dd>
-                                      #{source.chunk_index}, chars {source.char_start}-{source.char_end}
+                                      #{source.chunk_index}，字符 {source.char_start}-{source.char_end}
                                     </dd>
-                                    <dt>Score</dt>
+                                    <dt>分数</dt>
                                     <dd>
-                                      {source.score.toFixed(4)} / distance {source.distance.toFixed(4)}
+                                      {source.score.toFixed(4)} / 距离 {source.distance.toFixed(4)}
                                     </dd>
                                   </dl>
                                   <p>
                                     {sourceDetails[sourceKey]?.loading
-                                      ? "Loading full chunk..."
+                                      ? "正在加载完整切块..."
                                       : sourceDetails[sourceKey]?.error ?? sourceDetails[sourceKey]?.content ?? source.excerpt}
                                   </p>
                                   <button
@@ -600,7 +601,7 @@ export function ChatPage() {
                                     }
                                   >
                                     {copiedKey === `source:${sourceKey}` ? <Check size={14} /> : <Clipboard size={14} />}
-                                    <span>Copy citation</span>
+                                    <span>复制引用</span>
                                   </button>
                                 </div>
                               ) : null}
@@ -626,7 +627,7 @@ export function ChatPage() {
                                     void loadMemoryDetail(sourceKey, source.memory_id);
                                   }
                                 }}
-                                title={`${source.type} · ${source.project_name ?? "Global"}`}
+                                title={`${labelMemoryType(source.type)} · ${source.project_name ?? "全局"}`}
                               >
                                 {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                                 <strong>{source.source_id}：</strong>
@@ -635,18 +636,18 @@ export function ChatPage() {
                               {expanded ? (
                                 <div className="citation-detail">
                                   <dl>
-                                    <dt>Title</dt>
+                                    <dt>标题</dt>
                                     <dd>{source.title}</dd>
-                                    <dt>Type</dt>
-                                    <dd>{source.type}</dd>
-                                    <dt>Project</dt>
-                                    <dd>{source.project_name ?? (source.project_id ? projectNameById.get(source.project_id) ?? source.project_id : "Global")}</dd>
-                                    <dt>Occurred</dt>
-                                    <dd>{source.occurred_at ? formatDate(source.occurred_at) : "Not set"}</dd>
+                                    <dt>类型</dt>
+                                    <dd>{labelMemoryType(source.type)}</dd>
+                                    <dt>项目</dt>
+                                    <dd>{source.project_name ?? (source.project_id ? projectNameById.get(source.project_id) ?? source.project_id : "全局")}</dd>
+                                    <dt>发生时间</dt>
+                                    <dd>{source.occurred_at ? formatDate(source.occurred_at) : "未设置"}</dd>
                                   </dl>
                                   <p>
                                     {sourceDetails[sourceKey]?.loading
-                                      ? "Loading full memory..."
+                                      ? "正在加载完整记忆..."
                                       : sourceDetails[sourceKey]?.error ?? sourceDetails[sourceKey]?.content ?? source.content}
                                   </p>
                                   <button
@@ -660,7 +661,7 @@ export function ChatPage() {
                                     }
                                   >
                                     {copiedKey === `memory:${sourceKey}` ? <Check size={14} /> : <Clipboard size={14} />}
-                                    <span>Copy citation</span>
+                                    <span>复制引用</span>
                                   </button>
                                 </div>
                               ) : null}
@@ -675,11 +676,11 @@ export function ChatPage() {
               {pendingPrompt ? (
                 <>
                   <article className="chat-message user pending">
-                    <div className="chat-avatar">You</div>
+                    <div className="chat-avatar">我</div>
                     <div className="chat-message-body">
                       <div className="message-meta">
-                        <strong>You</strong>
-                        <span>sending</span>
+                        <strong>我</strong>
+                        <span>发送中</span>
                       </div>
                       <p>{pendingPrompt}</p>
                     </div>
@@ -688,13 +689,13 @@ export function ChatPage() {
                     <div className="chat-avatar">AI</div>
                     <div className="chat-message-body thinking-row">
                       <div className="message-meta">
-                        <strong>Thinking</strong>
-                        <span>{streamingAnswer ? "streaming answer" : "generating answer"}</span>
+                        <strong>思考中</strong>
+                        <span>{streamingAnswer ? "正在输出回答" : "正在生成回答"}</span>
                       </div>
                       {streamingAnswer ? (
                         <p className="streaming-answer">{streamingAnswer}</p>
                       ) : (
-                        <div className="typing-indicator" aria-label="Waiting for response">
+                        <div className="typing-indicator" aria-label="等待回答">
                           <span />
                           <span />
                           <span />
@@ -724,13 +725,13 @@ export function ChatPage() {
                 void ask();
               }
             }}
-            placeholder={activeConversation ? "Message WorkMemory" : "Ask from indexed knowledge"}
+            placeholder={activeConversation ? "给 WorkMemory 发送消息" : "向已索引知识提问"}
             disabled={busy === "send"}
           />
           <div className="composer-footer">
-            <span className="composer-mode-label">RAG answer</span>
+            <span className="composer-mode-label">RAG 回答</span>
             {busy === "send" ? (
-              <button className="send-button stop" type="button" onClick={stopGenerating} title="Stop generating">
+              <button className="send-button stop" type="button" onClick={stopGenerating} title="停止生成">
                 <Square size={16} />
               </button>
             ) : (

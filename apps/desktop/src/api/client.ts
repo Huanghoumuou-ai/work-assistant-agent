@@ -3,17 +3,22 @@ const DEFAULT_BACKEND_URL = "http://127.0.0.1:8000";
 export const backendUrl = import.meta.env.VITE_BACKEND_URL ?? DEFAULT_BACKEND_URL;
 
 async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
-  const response = await fetch(`${backendUrl}${path}`, {
-    headers: {
-      Accept: "application/json",
-      ...(init.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-      ...init.headers,
-    },
-    ...init,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${backendUrl}${path}`, {
+      headers: {
+        Accept: "application/json",
+        ...(init.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+        ...init.headers,
+      },
+      ...init,
+    });
+  } catch (error) {
+    throw new Error(error instanceof Error && error.message === "Failed to fetch" ? "连接后端失败" : "网络请求失败");
+  }
 
   if (!response.ok) {
-    let message = `Request failed with ${response.status}`;
+    let message = `请求失败：${response.status}`;
     try {
       const body = (await response.json()) as { detail?: { message?: string }; message?: string };
       message = body.detail?.message ?? body.message ?? message;

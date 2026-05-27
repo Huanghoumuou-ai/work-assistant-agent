@@ -4,6 +4,7 @@ import { RefreshCw, Search } from "lucide-react";
 import { getProjects } from "../api/projects.api";
 import { searchRetrieval } from "../api/retrieval.api";
 import type { ProjectItem, RetrievalSearchResult } from "../types/api";
+import { formatCount } from "../utils/labels";
 
 const DEFAULT_TOP_K = 5;
 
@@ -29,7 +30,7 @@ export function RetrievalPage() {
       setProjects(response.data);
       setMessage(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to load projects");
+      setMessage(error instanceof Error ? error.message : "项目加载失败");
     } finally {
       setLoadingProjects(false);
     }
@@ -38,7 +39,7 @@ export function RetrievalPage() {
   const runSearch = async () => {
     const cleanQuery = query.trim();
     if (!cleanQuery || searching) {
-      setMessage("Query is required");
+      setMessage("请输入检索内容");
       return;
     }
 
@@ -53,7 +54,7 @@ export function RetrievalPage() {
       });
       setResult(response.data);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Retrieval failed");
+      setMessage(error instanceof Error ? error.message : "检索失败");
     } finally {
       setSearching(false);
     }
@@ -67,17 +68,17 @@ export function RetrievalPage() {
     <section className="page">
       <header className="page-header row-header">
         <div>
-          <p className="eyebrow">Phase 7</p>
-          <h1>Retrieval</h1>
+          <p className="eyebrow">检索调试</p>
+          <h1>检索</h1>
         </div>
-        <button className="icon-button" type="button" onClick={() => void loadProjects()} title="Refresh projects" disabled={searching}>
+        <button className="icon-button" type="button" onClick={() => void loadProjects()} title="刷新项目" disabled={searching}>
           <RefreshCw size={18} />
         </button>
       </header>
 
       <div className="retrieval-panel">
         <label className="retrieval-query">
-          <span>Query</span>
+          <span>查询</span>
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -86,12 +87,12 @@ export function RetrievalPage() {
                 void runSearch();
               }
             }}
-            placeholder="Search indexed chunks"
+            placeholder="搜索已索引的切块"
             disabled={searching}
           />
         </label>
         <label>
-          <span>Top K</span>
+          <span>返回数量</span>
           <input
             type="number"
             min={1}
@@ -102,9 +103,9 @@ export function RetrievalPage() {
           />
         </label>
         <label>
-          <span>Project</span>
+          <span>项目</span>
           <select value={projectId} onChange={(event) => setProjectId(event.target.value)} disabled={searching || loadingProjects}>
-            <option value="">All uploaded documents</option>
+            <option value="">全部已上传资料</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}
@@ -113,12 +114,12 @@ export function RetrievalPage() {
           </select>
         </label>
         <label>
-          <span>Document ID</span>
-          <input value={documentId} onChange={(event) => setDocumentId(event.target.value)} placeholder="Optional exact document id" disabled={searching} />
+          <span>资料 ID</span>
+          <input value={documentId} onChange={(event) => setDocumentId(event.target.value)} placeholder="可选，精确资料 ID" disabled={searching} />
         </label>
         <button className="secondary-button retrieval-button" type="button" onClick={() => void runSearch()} disabled={searching || !query.trim()}>
           <Search size={16} />
-          <span>{searching ? "Searching" : "Search"}</span>
+          <span>{searching ? "检索中" : "检索"}</span>
         </button>
       </div>
 
@@ -126,23 +127,23 @@ export function RetrievalPage() {
 
       <div className="table-panel">
         <div className="table-heading">
-          <strong>Source Metadata</strong>
-          <span>{result ? `${result.items.length} results for "${result.query}"` : "No search yet"}</span>
+          <strong>来源元数据</strong>
+          <span>{result ? `${formatCount(result.items.length, "条")}，查询：“${result.query}”` : "尚未检索"}</span>
         </div>
         {!result ? (
-          <div className="empty-panel compact">Run retrieval against indexed chunks. Results omit chunk content and vectors.</div>
+          <div className="empty-panel compact">对已索引切块执行检索。结果不展示切块正文和向量。</div>
         ) : result.items.length === 0 ? (
-          <div className="empty-panel compact">No uploaded indexed source matched the query.</div>
+          <div className="empty-panel compact">没有匹配的已上传索引来源。</div>
         ) : (
           <table>
             <thead>
               <tr>
-                <th>Rank</th>
-                <th>Source</th>
-                <th>Chunk</th>
-                <th>Score</th>
-                <th>Provider</th>
-                <th>Hashes</th>
+                <th>排名</th>
+                <th>来源</th>
+                <th>切块</th>
+                <th>分数</th>
+                <th>服务商</th>
+                <th>哈希</th>
               </tr>
             </thead>
             <tbody>
@@ -151,19 +152,19 @@ export function RetrievalPage() {
                   <td>{item.rank}</td>
                   <td>
                     <strong>{item.source_filename}</strong>
-                    <span>{item.project_id ? projectNameById.get(item.project_id) ?? item.project_id : "Unfiled"}</span>
+                    <span>{item.project_id ? projectNameById.get(item.project_id) ?? item.project_id : "未归档"}</span>
                     <span>{item.document_id}</span>
                   </td>
                   <td>
                     <strong>#{item.chunk_index}</strong>
                     <span>
-                      chars {item.char_start}-{item.char_end}
+                      字符 {item.char_start}-{item.char_end}
                     </span>
                     <span>{item.chunk_id}</span>
                   </td>
                   <td>
                     <strong>{item.score.toFixed(4)}</strong>
-                    <span>distance {item.distance.toFixed(4)}</span>
+                    <span>距离 {item.distance.toFixed(4)}</span>
                   </td>
                   <td>
                     <strong>{item.provider}</strong>

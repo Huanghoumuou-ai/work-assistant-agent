@@ -15,6 +15,7 @@ import {
 import { getProjects } from "../api/projects.api";
 import type { MemoryItem, MemorySearchItem, MemoryStatus, MemoryStatusFilter, MemorySuggestion, MemoryType, ProjectItem } from "../types/api";
 import { formatDate } from "../utils/formatDate";
+import { formatCount, labelMemoryStatus, labelMemoryType } from "../utils/labels";
 
 const PAGE_SIZE = 10;
 const MEMORY_TYPES: MemoryType[] = ["note", "requirement", "decision", "rule"];
@@ -62,13 +63,13 @@ function toIsoOrNull(value: string) {
 
 function suggestionSourceLabel(suggestion: MemorySuggestion) {
   if (suggestion.source_type === "chat_suggestion") {
-    return suggestion.conversation_id ? `Chat ${suggestion.conversation_id}` : "Chat";
+    return suggestion.conversation_id ? `对话 ${suggestion.conversation_id}` : "对话";
   }
   if (suggestion.source_type === "document_suggestion") {
-    return suggestion.source_ref ? `Document ${suggestion.source_ref}` : "Document";
+    return suggestion.source_ref ? `资料 ${suggestion.source_ref}` : "资料";
   }
   if (suggestion.source_type === "text_suggestion") {
-    return suggestion.source_ref ? `Text ${suggestion.source_ref}` : "Text";
+    return suggestion.source_ref ? `文字 ${suggestion.source_ref}` : "文字";
   }
   return suggestion.source_ref ? `${suggestion.source_type} ${suggestion.source_ref}` : suggestion.source_type;
 }
@@ -132,7 +133,7 @@ export function MemoryPage() {
       await Promise.all([loadProjects(), loadMemories(nextOffset), loadSuggestions()]);
       setMessage(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to load memories");
+      setMessage(error instanceof Error ? error.message : "记忆加载失败");
     } finally {
       setBusy(null);
     }
@@ -173,16 +174,16 @@ export function MemoryPage() {
       if (editingId) {
         await updateMemory(editingId, payload);
         await loadMemories(offset);
-        setMessage("Memory updated");
+        setMessage("记忆已更新");
       } else {
         await createMemory(payload);
         setOffset(0);
         await loadMemories(0);
-        setMessage("Memory created");
+        setMessage("记忆已创建");
       }
       resetForm();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Save failed");
+      setMessage(error instanceof Error ? error.message : "保存失败");
     } finally {
       setBusy(null);
     }
@@ -203,9 +204,9 @@ export function MemoryPage() {
         setOffset(nextOffset);
       }
       await loadMemories(nextOffset);
-      setMessage(nextStatus === "archived" ? "Memory archived" : "Memory restored");
+      setMessage(nextStatus === "archived" ? "记忆已归档" : "记忆已恢复");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Status update failed");
+      setMessage(error instanceof Error ? error.message : "状态更新失败");
     } finally {
       setBusy(null);
     }
@@ -228,7 +229,7 @@ export function MemoryPage() {
       setSearchResults(response.data.items);
       setMessage(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Memory search failed");
+      setMessage(error instanceof Error ? error.message : "记忆搜索失败");
     } finally {
       setBusy(null);
     }
@@ -243,9 +244,9 @@ export function MemoryPage() {
     try {
       await acceptMemorySuggestion(suggestion.id);
       await Promise.all([loadSuggestions(), loadMemories(offset)]);
-      setMessage("Suggestion accepted into active Memory");
+      setMessage("建议已写入启用状态的记忆");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Accept suggestion failed");
+      setMessage(error instanceof Error ? error.message : "接受建议失败");
     } finally {
       setBusy(null);
     }
@@ -260,9 +261,9 @@ export function MemoryPage() {
     try {
       await rejectMemorySuggestion(suggestion.id);
       await loadSuggestions();
-      setMessage("Suggestion rejected");
+      setMessage("建议已拒绝");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Reject suggestion failed");
+      setMessage(error instanceof Error ? error.message : "拒绝建议失败");
     } finally {
       setBusy(null);
     }
@@ -271,7 +272,7 @@ export function MemoryPage() {
   const generateFromText = async () => {
     const cleanText = suggestionText.trim();
     if (busy !== null || !cleanText) {
-      setMessage("Text content is required");
+      setMessage("请输入文字内容");
       return;
     }
     setBusy("textSuggestion");
@@ -286,9 +287,9 @@ export function MemoryPage() {
       });
       await loadSuggestions();
       setSuggestionText("");
-      setMessage(`Generated ${response.data.total} pending work suggestion${response.data.total === 1 ? "" : "s"} for review`);
+      setMessage(`已生成 ${response.data.total} 条待审核工作建议`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Text suggestion generation failed");
+      setMessage(error instanceof Error ? error.message : "文字建议生成失败");
     } finally {
       setBusy(null);
     }
@@ -302,21 +303,21 @@ export function MemoryPage() {
     <section className="page">
       <header className="page-header row-header">
         <div>
-          <p className="eyebrow">Phase 11</p>
-          <h1>Memory</h1>
+          <p className="eyebrow">长期记忆</p>
+          <h1>记忆</h1>
         </div>
-        <button className="icon-button" type="button" onClick={() => void refresh()} title="Refresh memories" disabled={busy !== null}>
+        <button className="icon-button" type="button" onClick={() => void refresh()} title="刷新记忆" disabled={busy !== null}>
           <RefreshCw size={18} />
         </button>
       </header>
 
       <section className="table-panel">
         <div className="table-heading">
-          <strong>Pending Suggestions</strong>
-          <span>{busy === "load" ? "Loading" : `${suggestionTotal} pending`}</span>
+          <strong>待审核建议</strong>
+          <span>{busy === "load" ? "加载中" : `${suggestionTotal} 条待审核`}</span>
         </div>
         {suggestions.length === 0 ? (
-          <div className="empty-panel compact">No pending suggestions</div>
+          <div className="empty-panel compact">暂无待审核建议</div>
         ) : (
           <div className="source-grid compact suggestion-grid">
             {suggestions.map((suggestion) => {
@@ -324,14 +325,14 @@ export function MemoryPage() {
               return (
                 <article className="source-card" key={suggestion.id}>
                   <div className="source-card-header">
-                    <strong>{suggestion.type}</strong>
+                    <strong>{labelMemoryType(suggestion.type)}</strong>
                     <span>{formatDate(suggestion.created_at)}</span>
                   </div>
                   <h2>{suggestion.title}</h2>
                   <dl>
-                    <dt>Project</dt>
-                    <dd>{suggestion.project_name ?? "Unfiled"}</dd>
-                    <dt>Source</dt>
+                    <dt>项目</dt>
+                    <dd>{suggestion.project_name ?? "未归档"}</dd>
+                    <dt>来源</dt>
                     <dd>{suggestionSourceLabel(suggestion)}</dd>
                   </dl>
                   <p>{suggestion.content}</p>
@@ -339,11 +340,11 @@ export function MemoryPage() {
                   <div className="action-group">
                     <button className="secondary-button" type="button" onClick={() => void acceptSuggestion(suggestion)} disabled={busy !== null}>
                       <CheckCircle2 size={16} />
-                      <span>{suggestionBusy ? "Reviewing" : "Accept"}</span>
+                      <span>{suggestionBusy ? "处理中" : "接受"}</span>
                     </button>
                     <button className="secondary-button danger" type="button" onClick={() => void rejectSuggestion(suggestion)} disabled={busy !== null}>
                       <XCircle size={16} />
-                      <span>Reject</span>
+                      <span>拒绝</span>
                     </button>
                   </div>
                 </article>
@@ -355,9 +356,9 @@ export function MemoryPage() {
 
       <div className="memory-form">
         <label>
-          <span>Suggestion Project</span>
+          <span>建议项目</span>
           <select value={suggestionProjectId} onChange={(event) => setSuggestionProjectId(event.target.value)} disabled={busy !== null}>
-            <option value="">Unfiled</option>
+            <option value="">未归档</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}
@@ -366,47 +367,47 @@ export function MemoryPage() {
           </select>
         </label>
         <label>
-          <span>Include Memory</span>
+          <span>结合记忆</span>
           <select value={suggestionIncludeMemory ? "on" : "off"} onChange={(event) => setSuggestionIncludeMemory(event.target.value === "on")} disabled={busy !== null}>
-            <option value="on">On</option>
-            <option value="off">Off</option>
+            <option value="on">开启</option>
+            <option value="off">关闭</option>
           </select>
         </label>
         <label>
-          <span>Limit</span>
+          <span>数量</span>
           <input type="number" min={1} max={10} value={suggestionLimit} onChange={(event) => setSuggestionLimit(Number(event.target.value))} disabled={busy !== null} />
         </label>
         <label className="memory-title">
-          <span>Suggestion Title</span>
+          <span>建议标题</span>
           <input value={suggestionTitle} onChange={(event) => setSuggestionTitle(event.target.value)} disabled={busy !== null} />
         </label>
         <label className="memory-content">
-          <span>Text</span>
+          <span>文字</span>
           <textarea value={suggestionText} onChange={(event) => setSuggestionText(event.target.value)} disabled={busy !== null} />
         </label>
         <div className="memory-form-actions">
           <button className="secondary-button" type="button" onClick={() => void generateFromText()} disabled={busy !== null || !suggestionText.trim()}>
             <Lightbulb size={16} />
-            <span>{busy === "textSuggestion" ? "Generating" : "Generate Suggestions"}</span>
+            <span>{busy === "textSuggestion" ? "生成中" : "生成建议"}</span>
           </button>
         </div>
       </div>
 
       <div className="memory-form" ref={formRef}>
         <label>
-          <span>Type</span>
+          <span>类型</span>
           <select value={form.type} onChange={(event) => setForm((current) => ({ ...current, type: event.target.value as MemoryType }))} disabled={busy !== null}>
             {MEMORY_TYPES.map((type) => (
               <option key={type} value={type}>
-                {type}
+                {labelMemoryType(type)}
               </option>
             ))}
           </select>
         </label>
         <label>
-          <span>Project</span>
+          <span>项目</span>
           <select value={form.projectId} onChange={(event) => setForm((current) => ({ ...current, projectId: event.target.value }))} disabled={busy !== null}>
-            <option value="">Unfiled</option>
+            <option value="">未归档</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}
@@ -415,7 +416,7 @@ export function MemoryPage() {
           </select>
         </label>
         <label>
-          <span>Occurred At</span>
+          <span>发生时间</span>
           <input
             type="datetime-local"
             value={form.occurredAt}
@@ -424,36 +425,36 @@ export function MemoryPage() {
           />
         </label>
         <label className="memory-title">
-          <span>Title</span>
+          <span>标题</span>
           <input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} disabled={busy !== null} />
         </label>
         <label className="memory-content">
-          <span>Content</span>
+          <span>内容</span>
           <textarea value={form.content} onChange={(event) => setForm((current) => ({ ...current, content: event.target.value }))} disabled={busy !== null} />
         </label>
         <div className="memory-form-actions">
           {editingId ? (
             <button className="secondary-button" type="button" onClick={resetForm} disabled={busy !== null}>
               <X size={16} />
-              <span>Cancel</span>
+              <span>取消</span>
             </button>
           ) : null}
           <button className="secondary-button" type="button" onClick={() => void saveMemory()} disabled={busy !== null || !form.title.trim() || !form.content.trim()}>
             <Save size={16} />
-            <span>{busy === "save" ? "Saving" : editingId ? "Update" : "Create"}</span>
+            <span>{busy === "save" ? "保存中" : editingId ? "更新" : "创建"}</span>
           </button>
         </div>
       </div>
 
       <div className="retrieval-panel">
         <label className="retrieval-query">
-          <span>Search</span>
+          <span>搜索</span>
           <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} disabled={busy !== null} />
         </label>
         <label>
-          <span>Project</span>
+          <span>项目</span>
           <select value={searchProjectId} onChange={(event) => setSearchProjectId(event.target.value)} disabled={busy !== null}>
-            <option value="">All projects</option>
+            <option value="">全部项目</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}
@@ -462,30 +463,30 @@ export function MemoryPage() {
           </select>
         </label>
         <label>
-          <span>Type</span>
+          <span>类型</span>
           <select value={searchType} onChange={(event) => setSearchType(event.target.value as "" | MemoryType)} disabled={busy !== null}>
-            <option value="">All types</option>
+            <option value="">全部类型</option>
             {MEMORY_TYPES.map((type) => (
               <option key={type} value={type}>
-                {type}
+                {labelMemoryType(type)}
               </option>
             ))}
           </select>
         </label>
         <label>
-          <span>Archived</span>
+          <span>归档</span>
           <select value={searchIncludeArchived ? "include" : "exclude"} onChange={(event) => setSearchIncludeArchived(event.target.value === "include")} disabled={busy !== null}>
-            <option value="exclude">Exclude</option>
-            <option value="include">Include</option>
+            <option value="exclude">排除</option>
+            <option value="include">包含</option>
           </select>
         </label>
         <label>
-          <span>Limit</span>
+          <span>数量</span>
           <input type="number" min={1} max={20} value={searchLimit} onChange={(event) => setSearchLimit(Number(event.target.value))} disabled={busy !== null} />
         </label>
         <button className="secondary-button retrieval-button" type="button" onClick={() => void runSearch()} disabled={busy !== null || !searchQuery.trim()}>
           <Search size={16} />
-          <span>{busy === "search" ? "Searching" : "Search"}</span>
+          <span>{busy === "search" ? "搜索中" : "搜索"}</span>
         </button>
       </div>
 
@@ -499,11 +500,11 @@ export function MemoryPage() {
               </div>
               <h2>{item.memory.title}</h2>
               <dl>
-                <dt>Type</dt>
-                <dd>{item.memory.type}</dd>
-                <dt>Project</dt>
-                <dd>{item.memory.project_name ?? "Unfiled"}</dd>
-                <dt>Score</dt>
+                <dt>类型</dt>
+                <dd>{labelMemoryType(item.memory.type)}</dd>
+                <dt>项目</dt>
+                <dd>{item.memory.project_name ?? "未归档"}</dd>
+                <dt>分数</dt>
                 <dd>{item.score.toFixed(2)}</dd>
               </dl>
               <p>{item.memory.content}</p>
@@ -514,7 +515,7 @@ export function MemoryPage() {
 
       <div className="filters-row">
         <label>
-          <span>Project</span>
+          <span>项目</span>
           <select
             value={projectFilter}
             onChange={(event) => {
@@ -523,7 +524,7 @@ export function MemoryPage() {
             }}
             disabled={busy !== null}
           >
-            <option value="">All projects</option>
+            <option value="">全部项目</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}
@@ -532,7 +533,7 @@ export function MemoryPage() {
           </select>
         </label>
         <label>
-          <span>Type</span>
+          <span>类型</span>
           <select
             value={typeFilter}
             onChange={(event) => {
@@ -541,16 +542,16 @@ export function MemoryPage() {
             }}
             disabled={busy !== null}
           >
-            <option value="">All types</option>
+            <option value="">全部类型</option>
             {MEMORY_TYPES.map((type) => (
               <option key={type} value={type}>
-                {type}
+                {labelMemoryType(type)}
               </option>
             ))}
           </select>
         </label>
         <label>
-          <span>Status</span>
+          <span>状态</span>
           <select
             value={statusFilter}
             onChange={(event) => {
@@ -559,9 +560,9 @@ export function MemoryPage() {
             }}
             disabled={busy !== null}
           >
-            <option value="active">Active</option>
-            <option value="archived">Archived</option>
-            <option value="all">All</option>
+            <option value="active">启用</option>
+            <option value="archived">已归档</option>
+            <option value="all">全部</option>
           </select>
         </label>
       </div>
@@ -570,21 +571,21 @@ export function MemoryPage() {
 
       <div className="table-panel">
         <div className="table-heading">
-          <strong>Structured Memories</strong>
-          <span>{busy === "load" ? "Loading" : `${total} total`}</span>
+          <strong>结构化记忆</strong>
+          <span>{busy === "load" ? "加载中" : formatCount(total)}</span>
         </div>
         {memories.length === 0 ? (
-          <div className="empty-panel compact">{busy === "load" ? "Loading memories" : "No memories found"}</div>
+          <div className="empty-panel compact">{busy === "load" ? "正在加载记忆" : "没有找到记忆"}</div>
         ) : (
           <table>
             <thead>
               <tr>
-                <th>Memory</th>
-                <th>Type</th>
-                <th>Project</th>
-                <th>Status</th>
-                <th>When</th>
-                <th>Actions</th>
+                <th>记忆</th>
+                <th>类型</th>
+                <th>项目</th>
+                <th>状态</th>
+                <th>时间</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -596,29 +597,29 @@ export function MemoryPage() {
                       <strong>{memory.title}</strong>
                       <span>{memory.content}</span>
                     </td>
-                    <td>{memory.type}</td>
-                    <td>{memory.project_name ?? "Unfiled"}</td>
-                    <td>{memory.status}</td>
+                    <td>{labelMemoryType(memory.type)}</td>
+                    <td>{memory.project_name ?? "未归档"}</td>
+                    <td>{labelMemoryStatus(memory.status)}</td>
                     <td>
                       <strong>{memory.occurred_at ? formatDate(memory.occurred_at) : formatDate(memory.created_at)}</strong>
-                      <span>created {formatDate(memory.created_at)}</span>
+                      <span>创建于 {formatDate(memory.created_at)}</span>
                     </td>
                     <td>
                       <div className="action-group">
                         <button className="secondary-button" type="button" onClick={() => editMemory(memory)} disabled={busy !== null}>
-                          Edit
+                          编辑
                         </button>
                         <button
                           className="icon-button small"
                           type="button"
-                          title={memory.status === "archived" ? "Restore memory" : "Archive memory"}
+                          title={memory.status === "archived" ? "恢复记忆" : "归档记忆"}
                           onClick={() => void toggleStatus(memory)}
                           disabled={busy !== null}
                         >
                           {memory.status === "archived" ? <RotateCcw size={16} /> : <Archive size={16} />}
                         </button>
                       </div>
-                      {statusBusy ? <span>Updating</span> : null}
+                      {statusBusy ? <span>更新中</span> : null}
                     </td>
                   </tr>
                 );
@@ -628,13 +629,13 @@ export function MemoryPage() {
         )}
         <div className="pagination-row">
           <button className="secondary-button" type="button" disabled={offset === 0 || busy !== null} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-            Previous
+            上一页
           </button>
           <span>
-            Page {page} of {totalPages}
+            第 {page} / {totalPages} 页
           </span>
           <button className="secondary-button" type="button" disabled={offset + PAGE_SIZE >= total || busy !== null} onClick={() => setOffset(offset + PAGE_SIZE)}>
-            Next
+            下一页
           </button>
         </div>
       </div>

@@ -10,11 +10,11 @@ import { SettingsPage } from "./pages/SettingsPage";
 type PageKey = "chat" | "documents" | "memory" | "projects" | "settings";
 
 const navItems: Array<{ key: PageKey; label: string; icon: LucideIcon }> = [
-  { key: "chat", label: "Chat", icon: MessageSquare },
-  { key: "documents", label: "Documents", icon: Database },
-  { key: "memory", label: "Memory", icon: Bot },
-  { key: "projects", label: "Projects", icon: FolderKanban },
-  { key: "settings", label: "Settings", icon: Settings },
+  { key: "chat", label: "问答", icon: MessageSquare },
+  { key: "documents", label: "资料库", icon: Database },
+  { key: "memory", label: "记忆", icon: Bot },
+  { key: "projects", label: "项目", icon: FolderKanban },
+  { key: "settings", label: "设置", icon: Settings },
 ];
 
 export function App() {
@@ -42,10 +42,10 @@ export function App() {
           <div className="brand-mark">WM</div>
           <div>
             <strong>WorkMemory</strong>
-            <span>Agent</span>
+            <span>本地知识库</span>
           </div>
         </div>
-        <nav className="nav-list" aria-label="Primary">
+        <nav className="nav-list" aria-label="主导航">
           {navItems.map((item) => {
             const Icon = item.icon;
             return (

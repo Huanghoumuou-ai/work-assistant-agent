@@ -29,6 +29,7 @@ import { getProjects } from "../api/projects.api";
 import type { DocumentItem, DocumentStatus, PipelineJob, PipelineJobEvent, PipelineJobStatus, PipelineStatus, ProjectItem, ProvidersStatus } from "../types/api";
 import { formatDate } from "../utils/formatDate";
 import { formatFileSize } from "../utils/formatFileSize";
+import { formatCount, labelChunkStatus, labelDocumentStatus, labelEmbeddingStatus, labelParseStatus, labelPipelineEventType, labelPipelineStatus, labelPipelineStep } from "../utils/labels";
 
 const PAGE_SIZE = 10;
 
@@ -80,14 +81,14 @@ export function DocumentsPage() {
 
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const providerRisk = providersStatus && !providersStatus.embedding.configured ? providersStatus.embedding.reason ?? "Embedding provider is not configured." : null;
+  const providerRisk = providersStatus && !providersStatus.embedding.configured ? providersStatus.embedding.reason ?? "Embedding Provider 尚未配置。" : null;
 
   const loadProjects = async () => {
     try {
       const response = await getProjects();
       setProjects(response.data);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to load projects");
+      setMessage(error instanceof Error ? error.message : "项目加载失败");
     }
   };
 
@@ -108,7 +109,7 @@ export function DocumentsPage() {
         setMessage(null);
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to load documents");
+      setMessage(error instanceof Error ? error.message : "资料加载失败");
     } finally {
       if (!options.silent) {
         setLoading(false);
@@ -135,7 +136,7 @@ export function DocumentsPage() {
       const response = await getPipelineStatus();
       setPipelineStatus(response.data);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to load pipeline status");
+      setMessage(error instanceof Error ? error.message : "处理流水线状态加载失败");
     }
   };
 
@@ -144,7 +145,7 @@ export function DocumentsPage() {
       const response = await getProvidersStatus();
       setProvidersStatus(response.data);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to load provider status");
+      setMessage(error instanceof Error ? error.message : "服务商状态加载失败");
     }
   };
 
@@ -153,7 +154,7 @@ export function DocumentsPage() {
   };
 
   const queuePipeline = async (documentId: string, label: string) => {
-    setMessage(`Queueing pipeline for ${label}`);
+    setMessage(`正在为 ${label} 加入处理队列`);
     const response = await triggerDocumentPipeline(documentId);
     setPipelineJobs((current) => ({ ...current, [documentId]: response.data }));
     return response.data;
@@ -175,17 +176,17 @@ export function DocumentsPage() {
       let indexedFiles = 0;
       for (const [index, file] of selectedFiles.entries()) {
         const position = selectedFiles.length > 1 ? ` (${index + 1}/${selectedFiles.length})` : "";
-        setMessage(`Uploading ${file.name}${position}`);
+        setMessage(`正在上传 ${file.name}${position}`);
         const uploaded = await uploadDocument(file, uploadProjectId || undefined);
         await queuePipeline(uploaded.data.id, `${file.name}${position}`);
         indexedFiles += 1;
       }
       setOffset(0);
       await Promise.all([loadDocuments(0), refreshPipelineState()]);
-      setMessage(`Queued pipeline for ${indexedFiles} file${indexedFiles > 1 ? "s" : ""}`);
+      setMessage(`已为 ${indexedFiles} 个文件加入处理队列`);
     } catch (error) {
       await loadDocuments(0);
-      setMessage(error instanceof Error ? error.message : "Upload failed");
+      setMessage(error instanceof Error ? error.message : "上传失败");
     } finally {
       setBusyAction(null);
       if (inputRef.current) {
@@ -197,27 +198,27 @@ export function DocumentsPage() {
   const addPastedText = async () => {
     const cleanContent = textContent.trim();
     if (!cleanContent || busyAction) {
-      setMessage("Paste text content before adding it to the knowledge base");
+      setMessage("请先粘贴文字内容，再加入知识库");
       return;
     }
 
     setBusyAction("text");
-    setMessage("Saving pasted text");
+    setMessage("正在保存粘贴文字");
     try {
       const created = await createTextDocument({
         title: textTitle.trim() || null,
         content: cleanContent,
         project_id: textProjectId || undefined,
       });
-      await queuePipeline(created.data.id, "pasted text");
+      await queuePipeline(created.data.id, "粘贴文字");
       setTextTitle("");
       setTextContent("");
       setOffset(0);
       await Promise.all([loadDocuments(0), refreshPipelineState()]);
-      setMessage("Queued pipeline for pasted text");
+      setMessage("已为粘贴文字加入处理队列");
     } catch (error) {
       await loadDocuments(0);
-      setMessage(error instanceof Error ? error.message : "Failed to add pasted text");
+      setMessage(error instanceof Error ? error.message : "粘贴文字保存失败");
     } finally {
       setBusyAction(null);
     }
@@ -225,7 +226,7 @@ export function DocumentsPage() {
 
   const runPipeline = async (document: DocumentItem) => {
     if (document.status !== "uploaded") {
-      setMessage("Archived documents cannot be processed");
+      setMessage("已归档资料不能处理");
       return;
     }
 
@@ -234,10 +235,10 @@ export function DocumentsPage() {
     try {
       const job = await queuePipeline(document.id, document.original_filename);
       await Promise.all([loadDocuments(undefined, { silent: true }), refreshPipelineState()]);
-      setMessage(`Pipeline ${job.status}: ${document.original_filename}`);
+      setMessage(`处理流水线${labelPipelineStatus(job.status)}：${document.original_filename}`);
     } catch (error) {
       await loadDocuments(undefined, { silent: true });
-      setMessage(error instanceof Error ? error.message : "Pipeline request failed");
+      setMessage(error instanceof Error ? error.message : "处理请求失败");
     } finally {
       setBusyAction(null);
     }
@@ -250,9 +251,9 @@ export function DocumentsPage() {
       const response = await cancelPipelineJob(job.id);
       setPipelineJobs((current) => ({ ...current, [response.data.document_id]: response.data }));
       await refreshPipelineState();
-      setMessage(response.data.status === "canceled" ? "Pipeline canceled" : "Cancel requested; the current step will finish first");
+      setMessage(response.data.status === "canceled" ? "处理任务已取消" : "已请求取消；当前步骤完成后会停止");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Cancel failed");
+      setMessage(error instanceof Error ? error.message : "取消失败");
     } finally {
       setBusyAction(null);
     }
@@ -265,9 +266,9 @@ export function DocumentsPage() {
       const response = await retryPipelineJob(job.id);
       setPipelineJobs((current) => ({ ...current, [response.data.document_id]: response.data }));
       await refreshPipelineState();
-      setMessage("Pipeline retry queued");
+      setMessage("处理任务重试已排队");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Retry failed");
+      setMessage(error instanceof Error ? error.message : "重试失败");
     } finally {
       setBusyAction(null);
     }
@@ -287,7 +288,7 @@ export function DocumentsPage() {
       const response = await getPipelineJobEvents(job.id);
       setJobEvents((current) => ({ ...current, [job.id]: response.data.items }));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to load job events");
+      setMessage(error instanceof Error ? error.message : "任务事件加载失败");
     } finally {
       setBusyAction(null);
     }
@@ -295,16 +296,16 @@ export function DocumentsPage() {
 
   const changeJobPriority = async (job: PipelineJob) => {
     if (job.status !== "queued") {
-      setMessage("Only queued pipeline jobs can change priority");
+      setMessage("只有排队中的处理任务可以调整优先级");
       return;
     }
-    const value = window.prompt("Set queued job priority. Higher values run first.", String(job.priority));
+    const value = window.prompt("设置排队任务优先级。数字越大越先执行。", String(job.priority));
     if (value === null) {
       return;
     }
     const priority = Number(value);
     if (!Number.isInteger(priority)) {
-      setMessage("Priority must be an integer");
+      setMessage("优先级必须是整数");
       return;
     }
     setBusyAction(`priority:${job.id}`);
@@ -312,9 +313,9 @@ export function DocumentsPage() {
       const response = await updatePipelineJobPriority(job.id, priority);
       setPipelineJobs((current) => ({ ...current, [response.data.document_id]: response.data }));
       await refreshPipelineState();
-      setMessage("Pipeline priority updated");
+      setMessage("处理任务优先级已更新");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Priority update failed");
+      setMessage(error instanceof Error ? error.message : "优先级更新失败");
     } finally {
       setBusyAction(null);
     }
@@ -322,7 +323,7 @@ export function DocumentsPage() {
 
   const reprocessPipeline = async (document: DocumentItem) => {
     if (document.status !== "uploaded") {
-      setMessage("Archived documents cannot be reprocessed");
+      setMessage("已归档资料不能重新处理");
       return;
     }
 
@@ -336,9 +337,9 @@ export function DocumentsPage() {
       const response = await reprocessDocumentPipeline(documentId);
       setPipelineJobs((current) => ({ ...current, [documentId]: response.data }));
       await refreshPipelineState();
-      setMessage("Pipeline reprocess queued");
+      setMessage("重新处理已排队");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Reprocess failed");
+      setMessage(error instanceof Error ? error.message : "重新处理失败");
     } finally {
       setBusyAction(null);
     }
@@ -350,9 +351,9 @@ export function DocumentsPage() {
     try {
       const response = await processMissingDocuments(projectFilter || undefined);
       await refreshPipelineState();
-      setMessage(`Queued ${response.data.total} missing document pipeline${response.data.total === 1 ? "" : "s"}`);
+      setMessage(`已补排 ${response.data.total} 个缺失资料的处理任务`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Batch process failed");
+      setMessage(error instanceof Error ? error.message : "批量处理失败");
     } finally {
       setBusyAction(null);
     }
@@ -361,7 +362,7 @@ export function DocumentsPage() {
   const batchCancelVisible = async () => {
     const jobs = visiblePipelineJobs.filter((job) => job.status === "queued" || job.status === "running").slice(0, 100);
     if (!jobs.length) {
-      setMessage("No visible active pipeline jobs to cancel");
+      setMessage("当前视图没有可取消的活动处理任务");
       return;
     }
     setBusyAction("batchCancel");
@@ -372,9 +373,9 @@ export function DocumentsPage() {
         setPipelineJobs((current) => ({ ...current, [job.document_id]: job }));
       }
       await refreshPipelineState();
-      setMessage(`Canceled ${response.data.acted} pipeline job${response.data.acted === 1 ? "" : "s"}${response.data.skipped ? `, skipped ${response.data.skipped}` : ""}`);
+      setMessage(`已取消 ${response.data.acted} 个处理任务${response.data.skipped ? `，跳过 ${response.data.skipped} 个` : ""}`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Batch cancel failed");
+      setMessage(error instanceof Error ? error.message : "批量取消失败");
     } finally {
       setBusyAction(null);
     }
@@ -383,7 +384,7 @@ export function DocumentsPage() {
   const batchRetryVisible = async () => {
     const jobs = visiblePipelineJobs.filter((job) => job.status === "failed" || job.status === "canceled").slice(0, 100);
     if (!jobs.length) {
-      setMessage("No visible failed or canceled jobs to retry");
+      setMessage("当前视图没有可重试的失败或已取消任务");
       return;
     }
     setBusyAction("batchRetry");
@@ -394,9 +395,9 @@ export function DocumentsPage() {
         setPipelineJobs((current) => ({ ...current, [job.document_id]: job }));
       }
       await refreshPipelineState();
-      setMessage(`Retried ${response.data.acted} pipeline job${response.data.acted === 1 ? "" : "s"}${response.data.skipped ? `, skipped ${response.data.skipped}` : ""}`);
+      setMessage(`已重试 ${response.data.acted} 个处理任务${response.data.skipped ? `，跳过 ${response.data.skipped} 个` : ""}`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Batch retry failed");
+      setMessage(error instanceof Error ? error.message : "批量重试失败");
     } finally {
       setBusyAction(null);
     }
@@ -409,9 +410,9 @@ export function DocumentsPage() {
     try {
       await updateDocumentStatus(document.id, nextStatus);
       await loadDocuments();
-      setMessage(nextStatus === "archived" ? "Document archived" : "Document restored");
+      setMessage(nextStatus === "archived" ? "资料已归档" : "资料已恢复");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Status update failed");
+      setMessage(error instanceof Error ? error.message : "状态更新失败");
     } finally {
       setBusyAction(null);
     }
@@ -419,7 +420,7 @@ export function DocumentsPage() {
 
   const runParse = async (document: DocumentItem) => {
     if (document.status !== "uploaded") {
-      setMessage("Archived documents cannot be parsed");
+      setMessage("已归档资料不能解析");
       return;
     }
 
@@ -428,9 +429,9 @@ export function DocumentsPage() {
     try {
       await parseDocument(document.id);
       await loadDocuments();
-      setMessage("Document parsed");
+      setMessage("资料已解析");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Parse failed");
+      setMessage(error instanceof Error ? error.message : "解析失败");
       await loadDocuments();
     } finally {
       setBusyAction(null);
@@ -439,7 +440,7 @@ export function DocumentsPage() {
 
   const runChunk = async (document: DocumentItem) => {
     if (document.status !== "uploaded" || document.parse_result?.status !== "parsed") {
-      setMessage("Only uploaded and parsed documents can be chunked");
+      setMessage("只有已上传且已解析的资料可以切块");
       return;
     }
 
@@ -448,9 +449,9 @@ export function DocumentsPage() {
     try {
       await chunkDocument(document.id);
       await loadDocuments();
-      setMessage("Document chunked");
+      setMessage("资料已切块");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Chunking failed");
+      setMessage(error instanceof Error ? error.message : "切块失败");
       await loadDocuments();
     } finally {
       setBusyAction(null);
@@ -459,7 +460,7 @@ export function DocumentsPage() {
 
   const runIndex = async (document: DocumentItem) => {
     if (document.status !== "uploaded" || document.parse_result?.status !== "parsed" || document.chunk_result?.status !== "chunked") {
-      setMessage("Only uploaded, parsed, and chunked documents can be indexed");
+      setMessage("只有已上传、已解析且已切块的资料可以索引");
       return;
     }
 
@@ -471,13 +472,13 @@ export function DocumentsPage() {
         current.map((item) => (item.id === document.id ? { ...item, embedding_result: response.data } : item)),
       );
       await loadDocuments();
-      setMessage(`Document indexed: ${response.data.indexed_chunk_count} vectors`);
+      setMessage(`资料已索引：${response.data.indexed_chunk_count} 个向量`);
     } catch (error) {
       await loadDocuments();
-      const errorMessage = error instanceof Error ? error.message : "Indexing failed";
+      const errorMessage = error instanceof Error ? error.message : "索引失败";
       setMessage(
         errorMessage.includes("OPENAI_API_KEY")
-          ? `${errorMessage} For local smoke testing, set EMBEDDING_PROVIDER=fake in .env and restart the backend.`
+          ? `${errorMessage} 本地冒烟测试可在 .env 设置 EMBEDDING_PROVIDER=fake 后重启后端。`
           : errorMessage,
       );
     } finally {
@@ -487,7 +488,7 @@ export function DocumentsPage() {
 
   const suggestFromDocument = async (document: DocumentItem) => {
     if (document.status !== "uploaded" || document.parse_result?.status !== "parsed") {
-      setMessage("Only uploaded and parsed documents can generate suggestions");
+      setMessage("只有已上传且已解析的资料可以生成建议");
       return;
     }
 
@@ -495,9 +496,9 @@ export function DocumentsPage() {
     setMessage(null);
     try {
       const response = await generateMemorySuggestionsFromDocument(document.id, 5, true);
-      setMessage(`Generated ${response.data.total} pending work suggestion${response.data.total === 1 ? "" : "s"} for Memory review`);
+      setMessage(`已生成 ${response.data.total} 条待审核工作建议`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Suggestion generation failed");
+      setMessage(error instanceof Error ? error.message : "建议生成失败");
     } finally {
       setBusyAction(null);
     }
@@ -505,7 +506,7 @@ export function DocumentsPage() {
 
   const removeDocument = async (document: DocumentItem) => {
     const confirmed = window.confirm(
-      `Permanently delete "${document.original_filename}"? This will delete the database record and the original file.`,
+      `永久删除“${document.original_filename}”？这会删除数据库记录和原始文件。`,
     );
     if (!confirmed) {
       return;
@@ -521,9 +522,9 @@ export function DocumentsPage() {
         setOffset(nextOffset);
       }
       await loadDocuments(nextOffset);
-      setMessage("Document deleted");
+      setMessage("资料已删除");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Delete failed");
+      setMessage(error instanceof Error ? error.message : "删除失败");
     } finally {
       setBusyAction(null);
     }
@@ -586,8 +587,8 @@ export function DocumentsPage() {
     <section className="page">
       <header className="page-header row-header">
         <div>
-          <p className="eyebrow">Phase 15</p>
-          <h1>Documents</h1>
+          <p className="eyebrow">资料处理</p>
+          <h1>资料库</h1>
         </div>
         <button
           className="icon-button"
@@ -596,7 +597,7 @@ export function DocumentsPage() {
             setBusyAction("refresh");
             void Promise.all([loadProjects(), loadDocuments(), refreshPipelineState(), loadProvidersStatus()]).finally(() => setBusyAction(null));
           }}
-          title="Refresh documents"
+          title="刷新资料"
           disabled={busyAction !== null}
         >
           <RefreshCw size={18} />
@@ -605,9 +606,9 @@ export function DocumentsPage() {
 
       <div className="filters-row">
         <label>
-          <span>Upload Project</span>
+          <span>上传项目</span>
           <select value={uploadProjectId} onChange={(event) => setUploadProjectId(event.target.value)} disabled={busyAction !== null}>
-            <option value="">Unfiled</option>
+            <option value="">未归档</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}
@@ -616,7 +617,7 @@ export function DocumentsPage() {
           </select>
         </label>
         <label>
-          <span>Filter Project</span>
+          <span>筛选项目</span>
           <select
             value={projectFilter}
             onChange={(event) => {
@@ -625,7 +626,7 @@ export function DocumentsPage() {
             }}
             disabled={busyAction !== null}
           >
-            <option value="">All projects</option>
+            <option value="">全部项目</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}
@@ -634,7 +635,7 @@ export function DocumentsPage() {
           </select>
         </label>
         <label>
-          <span>Status</span>
+          <span>状态</span>
           <select
             value={statusFilter}
             onChange={(event) => {
@@ -643,9 +644,9 @@ export function DocumentsPage() {
             }}
             disabled={busyAction !== null}
           >
-            <option value="">All statuses</option>
-            <option value="uploaded">Uploaded</option>
-            <option value="archived">Archived</option>
+            <option value="">全部状态</option>
+            <option value="uploaded">已上传</option>
+            <option value="archived">已归档</option>
           </select>
         </label>
       </div>
@@ -654,7 +655,7 @@ export function DocumentsPage() {
         <div className="provider-warning">
           <AlertTriangle size={18} />
           <span>
-            Index provider risk: {providerRisk} Open Settings / Provider Diagnostics before running large batches.
+            索引服务商风险：{providerRisk} 批量处理前请打开设置里的服务商诊断。
           </span>
         </div>
       ) : null}
@@ -680,11 +681,11 @@ export function DocumentsPage() {
       >
         <FileUp size={28} />
         <div>
-          <strong>{busyAction === "upload" ? "Processing file" : "Drop files here"}</strong>
-          <span>Files are saved locally, then automatically parsed, chunked, and indexed into the vector database.</span>
+          <strong>{busyAction === "upload" ? "正在处理文件" : "拖放文件到这里"}</strong>
+          <span>文件会保存在本地，然后自动解析、切块并索引到向量库。</span>
         </div>
         <button className="secondary-button" type="button" onClick={() => inputRef.current?.click()} disabled={busyAction !== null}>
-          Choose Files
+          选择文件
         </button>
         <input
           ref={inputRef}
@@ -703,19 +704,19 @@ export function DocumentsPage() {
         <div className="text-ingest-heading">
           <FilePlus2 size={20} />
           <div>
-            <strong>Paste text into knowledge base</strong>
-            <span>Save copied notes, rules, or requirements as a local text document, then automatically parse, chunk, and index it.</span>
+            <strong>粘贴文字到知识库</strong>
+            <span>把复制的笔记、规则或需求保存为本地文字资料，然后自动解析、切块并索引。</span>
           </div>
         </div>
         <div className="text-ingest-grid">
           <label>
-            <span>Title</span>
-            <input value={textTitle} onChange={(event) => setTextTitle(event.target.value)} placeholder="Optional title, e.g. Meeting notes" disabled={busyAction !== null} />
+            <span>标题</span>
+            <input value={textTitle} onChange={(event) => setTextTitle(event.target.value)} placeholder="可选标题，例如会议纪要" disabled={busyAction !== null} />
           </label>
           <label>
-            <span>Project</span>
+            <span>项目</span>
             <select value={textProjectId} onChange={(event) => setTextProjectId(event.target.value)} disabled={busyAction !== null}>
-              <option value="">Unfiled</option>
+              <option value="">未归档</option>
               {projects.map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}
@@ -724,12 +725,12 @@ export function DocumentsPage() {
             </select>
           </label>
           <label className="text-ingest-content">
-            <span>Text</span>
-            <textarea value={textContent} onChange={(event) => setTextContent(event.target.value)} placeholder="Paste copied text here..." disabled={busyAction !== null} />
+            <span>文字</span>
+            <textarea value={textContent} onChange={(event) => setTextContent(event.target.value)} placeholder="在这里粘贴复制的文字..." disabled={busyAction !== null} />
           </label>
           <button className="secondary-button" type="button" onClick={() => void addPastedText()} disabled={busyAction !== null || !textContent.trim()}>
             <Database size={16} />
-            <span>{busyAction === "text" ? "Processing" : "Add to Knowledge Base"}</span>
+            <span>{busyAction === "text" ? "处理中" : "加入知识库"}</span>
           </button>
         </div>
       </div>
@@ -739,53 +740,53 @@ export function DocumentsPage() {
       <div className="table-panel pipeline-jobs-panel">
         <div className="table-heading pipeline-heading">
           <div>
-            <strong>Pipeline Jobs</strong>
+            <strong>处理任务</strong>
             <span>
               {pipelineStatus
-                ? `${pipelineStatus.active_count} active · ${pipelineStatus.failed_count} failed · worker ${pipelineStatus.worker_running ? "online" : "offline"} · stale ${pipelineStatus.stale_running_count}`
-                : "Loading status"}
+                ? `${pipelineStatus.active_count} 个活动 · ${pipelineStatus.failed_count} 个失败 · 工作器 ${pipelineStatus.worker_running ? "在线" : "离线"} · 过期 ${pipelineStatus.stale_running_count}`
+                : "正在加载状态"}
             </span>
           </div>
           <div className="pipeline-toolbar">
             <select value={pipelineStatusFilter} onChange={(event) => setPipelineStatusFilter(event.target.value as "" | PipelineJobStatus)} disabled={busyAction !== null}>
-              <option value="">All jobs</option>
-              <option value="queued">Queued</option>
-              <option value="running">Running</option>
-              <option value="succeeded">Succeeded</option>
-              <option value="failed">Failed</option>
-              <option value="canceled">Canceled</option>
+              <option value="">全部任务</option>
+              <option value="queued">排队中</option>
+              <option value="running">运行中</option>
+              <option value="succeeded">已完成</option>
+              <option value="failed">失败</option>
+              <option value="canceled">已取消</option>
             </select>
             <button className="secondary-button" type="button" onClick={() => void processMissing()} disabled={busyAction !== null}>
               <ListChecks size={16} />
-              <span>{busyAction === "batch" ? "Queueing" : "Process missing documents"}</span>
+              <span>{busyAction === "batch" ? "排队中" : "处理缺失资料"}</span>
             </button>
             <button className="secondary-button danger" type="button" onClick={() => void batchCancelVisible()} disabled={busyAction !== null || activeVisibleCount === 0}>
               <XCircle size={16} />
-              <span>{busyAction === "batchCancel" ? "Canceling" : `Cancel active (${activeVisibleCount})`}</span>
+              <span>{busyAction === "batchCancel" ? "取消中" : `取消活动任务（${activeVisibleCount}）`}</span>
             </button>
             <button className="secondary-button" type="button" onClick={() => void batchRetryVisible()} disabled={busyAction !== null || retryableVisibleCount === 0}>
               <RotateCcw size={16} />
-              <span>{busyAction === "batchRetry" ? "Retrying" : `Retry failed (${retryableVisibleCount})`}</span>
+              <span>{busyAction === "batchRetry" ? "重试中" : `重试失败任务（${retryableVisibleCount}）`}</span>
             </button>
-            <button className="icon-button" type="button" onClick={() => void refreshPipelineState()} title="Refresh pipeline jobs" disabled={busyAction !== null}>
+            <button className="icon-button" type="button" onClick={() => void refreshPipelineState()} title="刷新处理任务" disabled={busyAction !== null}>
               <RefreshCw size={16} />
             </button>
           </div>
         </div>
         {visiblePipelineJobs.length === 0 ? (
-          <div className="empty-panel compact">No pipeline jobs found</div>
+          <div className="empty-panel compact">没有找到处理任务</div>
         ) : (
           <table>
             <thead>
               <tr>
-                <th>Document</th>
-                <th>Status</th>
-                <th>Priority</th>
-                <th>Step</th>
-                <th>Progress</th>
-                <th>Updated</th>
-                <th>Error</th>
-                <th>Actions</th>
+                <th>资料</th>
+                <th>状态</th>
+                <th>优先级</th>
+                <th>步骤</th>
+                <th>进度</th>
+                <th>更新时间</th>
+                <th>错误</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -800,17 +801,17 @@ export function DocumentsPage() {
                         <span>{job.document_id}</span>
                       </td>
                       <td>
-                        <strong className={`status-text ${active ? "pending" : job.status}`}>{stale ? "stale" : job.status}</strong>
-                        {job.cancel_requested ? <span>cancel requested</span> : null}
+                        <strong className={`status-text ${active ? "pending" : job.status}`}>{stale ? "租约过期" : labelPipelineStatus(job.status)}</strong>
+                        {job.cancel_requested ? <span>已请求取消</span> : null}
                         {job.locked_by ? <span>{job.locked_by}</span> : null}
                       </td>
                       <td>
                         <strong>{job.priority}</strong>
                         <span>
-                          attempt {job.attempt_count}/{job.max_attempts}
+                          尝试 {job.attempt_count}/{job.max_attempts}
                         </span>
                       </td>
-                      <td>{job.current_step ?? "-"}</td>
+                      <td>{labelPipelineStep(job.current_step)}</td>
                       <td>
                         <span>{job.progress_percent}%</span>
                         <div className="progress-track">
@@ -819,30 +820,30 @@ export function DocumentsPage() {
                       </td>
                       <td>{formatDate(job.updated_at)}</td>
                       <td>
-                        <span>{job.error_message ? `${job.last_error_code ? `${job.last_error_code}: ` : ""}${job.error_message}${job.current_step === "index" ? " · Open Settings diagnostics" : ""}` : "-"}</span>
+                        <span>{job.error_message ? `${job.last_error_code ? `${job.last_error_code}: ` : ""}${job.error_message}${job.current_step === "index" ? " · 打开设置诊断" : ""}` : "-"}</span>
                       </td>
                       <td>
                         <div className="action-group">
-                          <button className="icon-button small" type="button" title="Show job events" onClick={() => void toggleJobEvents(job)} disabled={busyAction !== null}>
+                          <button className="icon-button small" type="button" title="查看任务事件" onClick={() => void toggleJobEvents(job)} disabled={busyAction !== null}>
                             <Clock3 size={16} />
                           </button>
                           {job.status === "queued" ? (
-                            <button className="icon-button small" type="button" title="Set priority" onClick={() => void changeJobPriority(job)} disabled={busyAction !== null}>
+                            <button className="icon-button small" type="button" title="设置优先级" onClick={() => void changeJobPriority(job)} disabled={busyAction !== null}>
                               <SlidersHorizontal size={16} />
                             </button>
                           ) : null}
                           {active ? (
-                            <button className="icon-button small danger" type="button" title="Cancel pipeline" onClick={() => void cancelPipeline(job)} disabled={busyAction !== null}>
+                            <button className="icon-button small danger" type="button" title="取消处理任务" onClick={() => void cancelPipeline(job)} disabled={busyAction !== null}>
                               <XCircle size={16} />
                             </button>
                           ) : null}
                           {job.status === "failed" || job.status === "canceled" ? (
-                            <button className="icon-button small" type="button" title="Retry pipeline" onClick={() => void retryPipeline(job)} disabled={busyAction !== null}>
+                            <button className="icon-button small" type="button" title="重试处理任务" onClick={() => void retryPipeline(job)} disabled={busyAction !== null}>
                               <RotateCcw size={16} />
                             </button>
                           ) : null}
                           {job.status === "succeeded" ? (
-                            <button className="icon-button small" type="button" title="Reprocess document" onClick={() => void reprocessPipelineById(job.document_id)} disabled={busyAction !== null}>
+                            <button className="icon-button small" type="button" title="重新处理资料" onClick={() => void reprocessPipelineById(job.document_id)} disabled={busyAction !== null}>
                               <ListChecks size={16} />
                             </button>
                           ) : null}
@@ -853,20 +854,20 @@ export function DocumentsPage() {
                       <tr className="pipeline-events-row">
                         <td colSpan={8}>
                           {busyAction === `events:${job.id}` ? (
-                            <span>Loading events</span>
+                            <span>正在加载事件</span>
                           ) : jobEvents[job.id]?.length ? (
                             <div className="pipeline-event-list">
                               {jobEvents[job.id].map((event) => (
                                 <div key={event.id} className="pipeline-event-item">
-                                  <strong>{event.event_type}</strong>
-                                  <span>{event.step ?? "job"}</span>
+                                  <strong>{labelPipelineEventType(event.event_type)}</strong>
+                                  <span>{labelPipelineStep(event.step)}</span>
                                   <span>{event.message ?? "-"}</span>
                                   <time>{formatDate(event.created_at)}</time>
                                 </div>
                               ))}
                             </div>
                           ) : (
-                            <span>No events recorded</span>
+                            <span>暂无事件记录</span>
                           )}
                         </td>
                       </tr>
@@ -881,25 +882,25 @@ export function DocumentsPage() {
 
       <div className="table-panel">
         <div className="table-heading">
-          <strong>Uploaded Documents</strong>
-          <span>{loading ? "Loading" : `${total} total`}</span>
+          <strong>已上传资料</strong>
+          <span>{loading ? "加载中" : formatCount(total)}</span>
         </div>
         {documents.length === 0 ? (
-          <div className="empty-panel compact">{loading ? "Loading documents" : "No documents found"}</div>
+          <div className="empty-panel compact">{loading ? "正在加载资料" : "没有找到资料"}</div>
         ) : (
           <table>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Size</th>
-                <th>Status</th>
-                <th>Parse</th>
-                <th>Chunks</th>
-                <th>Index</th>
-                <th>Pipeline</th>
-                <th>Uploaded</th>
-                <th>Actions</th>
+                <th>名称</th>
+                <th>类型</th>
+                <th>大小</th>
+                <th>状态</th>
+                <th>解析</th>
+                <th>切块</th>
+                <th>索引</th>
+                <th>处理流水线</th>
+                <th>上传时间</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -931,62 +932,62 @@ export function DocumentsPage() {
                     <td>{document.extension}</td>
                     <td>{formatFileSize(document.size_bytes)}</td>
                     <td>
-                      <span className={`status-pill ${document.status}`}>{document.status}</span>
+                      <span className={`status-pill ${document.status}`}>{labelDocumentStatus(document.status)}</span>
                     </td>
                     <td>
                       <strong className={`status-text ${parseBusy ? "pending" : parseResult?.status ?? "idle"}`}>
-                        {parseBusy ? "parsing" : parseResult?.status ?? "not parsed"}
+                        {parseBusy ? "解析中" : labelParseStatus(parseResult?.status)}
                       </strong>
                       {parseResult ? (
                         <span>
                           {parseResult.status === "parsed"
-                            ? `${parseResult.char_count} chars${parseResult.truncated ? ", truncated" : ""}`
-                            : parseResult.error_message ?? "failed"}
+                            ? `${parseResult.char_count} 字符${parseResult.truncated ? "，已截断" : ""}`
+                            : parseResult.error_message ?? "失败"}
                         </span>
                       ) : null}
                     </td>
                     <td>
                       <strong className={`status-text ${chunkBusy ? "pending" : chunkResult?.status ?? "idle"}`}>
-                        {chunkBusy ? "chunking" : chunkResult?.status ?? "not chunked"}
+                        {chunkBusy ? "切块中" : labelChunkStatus(chunkResult?.status)}
                       </strong>
                       {chunkResult ? (
                         <span>
                           {chunkResult.status === "chunked"
-                            ? `${chunkResult.chunk_count} chunks${chunkResult.truncated ? ", truncated" : ""}`
-                            : chunkResult.error_message ?? "failed"}
+                            ? `${chunkResult.chunk_count} 个切块${chunkResult.truncated ? "，已截断" : ""}`
+                            : chunkResult.error_message ?? "失败"}
                         </span>
                       ) : null}
                     </td>
                     <td>
                       <strong className={`status-text ${indexBusy ? "pending" : embeddingResult?.status ?? "idle"}`}>
-                        {indexBusy ? "indexing" : embeddingResult?.status ?? "not indexed"}
+                        {indexBusy ? "索引中" : labelEmbeddingStatus(embeddingResult?.status)}
                       </strong>
                       {embeddingResult ? (
                         <span>
                           {embeddingResult.status === "indexed"
-                            ? `${embeddingResult.indexed_chunk_count} vectors, ${embeddingResult.provider}`
-                            : embeddingResult.error_message ?? "failed"}
+                            ? `${embeddingResult.indexed_chunk_count} 个向量，${embeddingResult.provider}`
+                            : embeddingResult.error_message ?? "失败"}
                         </span>
                       ) : null}
                     </td>
                     <td>
                       <strong className={`status-text ${pipelineBusy || pipelineActive ? "pending" : pipelineJob?.status ?? "idle"}`}>
-                        {pipelineBusy ? "queueing" : pipelineJob?.status ?? "not queued"}
+                        {pipelineBusy ? "排队中" : labelPipelineStatus(pipelineJob?.status)}
                       </strong>
                       {pipelineJob ? (
                         <>
                           <span>
                             {pipelineJob.status === "running" && pipelineJob.current_step
-                              ? `${pipelineJob.current_step} · ${pipelineJob.progress_percent}%`
+                              ? `${labelPipelineStep(pipelineJob.current_step)} · ${pipelineJob.progress_percent}%`
                               : pipelineJob.status === "failed"
-                                ? `${pipelineJob.error_message ?? "failed"}${pipelineJob.current_step === "index" ? " · Open Settings diagnostics" : ""}`
+                                ? `${pipelineJob.error_message ?? "失败"}${pipelineJob.current_step === "index" ? " · 打开设置诊断" : ""}`
                                 : pipelineJob.status === "canceled"
-                                  ? "canceled"
+                                  ? "已取消"
                                   : pipelineJob.status === "succeeded"
-                                    ? "done · 100%"
-                                    : `waiting · ${pipelineJob.progress_percent}%`}
+                                    ? "完成 · 100%"
+                                    : `等待中 · ${pipelineJob.progress_percent}%`}
                           </span>
-                          <div className="progress-track" aria-label={`Pipeline progress ${pipelineJob.progress_percent}%`}>
+                          <div className="progress-track" aria-label={`处理进度 ${pipelineJob.progress_percent}%`}>
                             <div style={{ width: `${pipelineJob.progress_percent}%` }} />
                           </div>
                         </>
@@ -999,7 +1000,7 @@ export function DocumentsPage() {
                           <button
                             className="icon-button small danger"
                             type="button"
-                            title={pipelineJob.status === "queued" ? "Cancel queued pipeline" : "Request cancel after current step"}
+                            title={pipelineJob.status === "queued" ? "取消排队中的处理任务" : "请求当前步骤结束后取消"}
                             onClick={() => void cancelPipeline(pipelineJob)}
                             disabled={busyAction !== null}
                           >
@@ -1009,7 +1010,7 @@ export function DocumentsPage() {
                           <button
                             className="icon-button small"
                             type="button"
-                            title="Retry pipeline"
+                            title="重试处理任务"
                             onClick={() => void retryPipeline(pipelineJob)}
                             disabled={busyAction !== null || document.status === "archived"}
                           >
@@ -1019,7 +1020,7 @@ export function DocumentsPage() {
                           <button
                             className="icon-button small"
                             type="button"
-                            title="Reprocess document pipeline"
+                            title="重新处理资料"
                             onClick={() => void reprocessPipeline(document)}
                             disabled={busyAction !== null || document.status === "archived"}
                           >
@@ -1029,7 +1030,7 @@ export function DocumentsPage() {
                           <button
                             className="icon-button small"
                             type="button"
-                            title={document.status === "archived" ? "Archived documents cannot be processed" : "Process document pipeline"}
+                            title={document.status === "archived" ? "已归档资料不能处理" : "处理资料"}
                             onClick={() => void runPipeline(document)}
                             disabled={busyAction !== null || document.status === "archived"}
                           >
@@ -1039,7 +1040,7 @@ export function DocumentsPage() {
                         <button
                           className="icon-button small"
                           type="button"
-                          title={document.status === "archived" ? "Archived documents cannot be parsed" : "Parse document"}
+                          title={document.status === "archived" ? "已归档资料不能解析" : "解析资料"}
                           onClick={() => void runParse(document)}
                           disabled={busyAction !== null || document.status === "archived"}
                         >
@@ -1048,7 +1049,7 @@ export function DocumentsPage() {
                         <button
                           className="icon-button small"
                           type="button"
-                          title={canChunk ? "Chunk document" : "Parse the uploaded document before chunking"}
+                          title={canChunk ? "切块资料" : "请先解析已上传资料再切块"}
                           onClick={() => void runChunk(document)}
                           disabled={busyAction !== null || !canChunk}
                         >
@@ -1057,7 +1058,7 @@ export function DocumentsPage() {
                         <button
                           className="icon-button small"
                           type="button"
-                          title={canIndex ? "Index document" : "Chunk the parsed document before indexing"}
+                          title={canIndex ? "索引资料" : "请先切块已解析资料再索引"}
                           onClick={() => void runIndex(document)}
                           disabled={busyAction !== null || !canIndex}
                         >
@@ -1066,7 +1067,7 @@ export function DocumentsPage() {
                         <button
                           className="icon-button small"
                           type="button"
-                          title={canSuggest ? "Generate pending Memory suggestions from this document" : "Parse the uploaded document before suggesting memories"}
+                          title={canSuggest ? "从这份资料生成待审核记忆建议" : "请先解析已上传资料再生成建议"}
                           onClick={() => void suggestFromDocument(document)}
                           disabled={busyAction !== null || !canSuggest}
                         >
@@ -1075,7 +1076,7 @@ export function DocumentsPage() {
                         <button
                           className="icon-button small"
                           type="button"
-                          title={document.status === "archived" ? "Restore document" : "Archive document"}
+                          title={document.status === "archived" ? "恢复资料" : "归档资料"}
                           onClick={() => void changeStatus(document)}
                           disabled={busyAction !== null}
                         >
@@ -1084,7 +1085,7 @@ export function DocumentsPage() {
                         <button
                           className="icon-button small danger"
                           type="button"
-                          title="Permanently delete document"
+                          title="永久删除资料"
                           onClick={() => void removeDocument(document)}
                           disabled={busyAction !== null}
                         >
@@ -1094,24 +1095,24 @@ export function DocumentsPage() {
                       {pipelineBusy || pipelineCancelBusy || pipelineRetryBusy || pipelineReprocessBusy || parseBusy || chunkBusy || indexBusy || suggestBusy || statusBusy || deleteBusy ? (
                         <span>
                           {pipelineBusy
-                            ? "Queueing"
+                            ? "排队中"
                             : pipelineCancelBusy
-                              ? "Canceling"
+                              ? "取消中"
                               : pipelineRetryBusy
-                                ? "Retrying"
+                                ? "重试中"
                                 : pipelineReprocessBusy
-                                  ? "Reprocessing"
+                                  ? "重新处理中"
                                   : parseBusy
-                                    ? "Parsing"
+                                    ? "解析中"
                                     : chunkBusy
-                                      ? "Chunking"
+                                      ? "切块中"
                                       : indexBusy
-                                        ? "Indexing"
+                                        ? "索引中"
                                         : suggestBusy
-                                          ? "Suggesting"
+                                          ? "生成建议中"
                                           : statusBusy
-                                            ? "Updating"
-                                            : "Deleting"}
+                                            ? "更新中"
+                                            : "删除中"}
                         </span>
                       ) : null}
                     </td>
@@ -1128,10 +1129,10 @@ export function DocumentsPage() {
             disabled={offset === 0 || busyAction !== null || loading}
             onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
           >
-            Previous
+            上一页
           </button>
           <span>
-            Page {page} of {totalPages}
+            第 {page} / {totalPages} 页
           </span>
           <button
             className="secondary-button"
@@ -1139,7 +1140,7 @@ export function DocumentsPage() {
             disabled={offset + PAGE_SIZE >= total || busyAction !== null || loading}
             onClick={() => setOffset(offset + PAGE_SIZE)}
           >
-            Next
+            下一页
           </button>
         </div>
       </div>

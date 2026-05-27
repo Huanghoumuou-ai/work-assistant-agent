@@ -27,6 +27,7 @@ import type {
   SettingsStatus,
 } from "../types/api";
 import { formatDate } from "../utils/formatDate";
+import { labelEmbeddingStatus, labelEnvironment, labelProviderKind, onOff, yesNo } from "../utils/labels";
 
 type LoadState =
   | { status: "loading"; health?: ApiResponse<HealthStatus>; settings?: ApiResponse<SettingsStatus>; index?: ApiResponse<IndexStatus>; error?: undefined }
@@ -68,7 +69,7 @@ export function SettingsPage() {
     } catch (error) {
       setState({
         status: "offline",
-        error: error instanceof Error ? error.message : "Connection failed",
+        error: error instanceof Error ? error.message : "连接后端失败",
       });
     }
   };
@@ -80,7 +81,7 @@ export function SettingsPage() {
       const response = await testEmbeddingProvider();
       setEmbeddingTest(response.data);
     } catch (error) {
-      setMaintenanceMessage(error instanceof Error ? error.message : "Embedding provider test failed");
+      setMaintenanceMessage(error instanceof Error ? error.message : "Embedding 服务商测试失败");
     } finally {
       if (state.status === "online") {
         try {
@@ -101,7 +102,7 @@ export function SettingsPage() {
       const response = await testLlmProvider();
       setLlmTest(response.data);
     } catch (error) {
-      setMaintenanceMessage(error instanceof Error ? error.message : "LLM provider test failed");
+      setMaintenanceMessage(error instanceof Error ? error.message : "LLM 服务商测试失败");
     } finally {
       if (state.status === "online") {
         try {
@@ -121,7 +122,7 @@ export function SettingsPage() {
     }
     const targetCollection = collectionName ?? state.diagnostics.data.collection_name;
     const confirmed = window.confirm(
-      `Reset index collection "${targetCollection}"?\n\nThis clears Chroma vectors and embedding result metadata only. It does not delete original documents, parsed text, chunks, conversations, or memory.`,
+      `重置索引集合“${targetCollection}”？\n\n这只会清理 Chroma 向量和 embedding 结果元数据，不会删除原始资料、解析文本、切块、对话或记忆。`,
     );
     if (!confirmed) {
       return;
@@ -135,11 +136,11 @@ export function SettingsPage() {
         collection_name: targetCollection,
         clear_embedding_results: true,
       });
-      setMaintenanceMessage(`Index reset completed. Deleted ${response.data.embedding_results_deleted} embedding result record${response.data.embedding_results_deleted === 1 ? "" : "s"}.`);
+      setMaintenanceMessage(`索引已重置。删除 ${response.data.embedding_results_deleted} 条 embedding 结果记录。`);
       const [index, diagnostics, collections] = await Promise.all([getIndexStatus(), getIndexDiagnostics(), getIndexCollections()]);
       setState((current) => (current.status === "online" ? { ...current, index, diagnostics, collections } : current));
     } catch (error) {
-      setMaintenanceMessage(error instanceof Error ? error.message : "Index reset failed");
+      setMaintenanceMessage(error instanceof Error ? error.message : "索引重置失败");
     } finally {
       setBusyAction(null);
     }
@@ -153,10 +154,10 @@ export function SettingsPage() {
     <section className="page">
       <header className="page-header row-header">
         <div>
-          <p className="eyebrow">Runtime</p>
-          <h1>Settings</h1>
+          <p className="eyebrow">运行状态</p>
+          <h1>设置</h1>
         </div>
-        <button className="icon-button" type="button" onClick={() => void load()} title="Refresh backend status">
+        <button className="icon-button" type="button" onClick={() => void load()} title="刷新后端状态">
           <RefreshCw size={18} />
         </button>
       </header>
@@ -164,7 +165,7 @@ export function SettingsPage() {
       <div className="status-strip">
         <span className={state.status === "online" ? "status-dot online" : "status-dot"} />
         <div>
-          <strong>{state.status === "online" ? "Backend online" : state.status === "loading" ? "Checking backend" : "Backend offline"}</strong>
+          <strong>{state.status === "online" ? "后端在线" : state.status === "loading" ? "正在检查后端" : "后端离线"}</strong>
           <span>{backendUrl}</span>
         </div>
       </div>
@@ -173,78 +174,78 @@ export function SettingsPage() {
         <>
           <div className="settings-grid">
             <dl>
-              <dt>Application</dt>
+              <dt>应用</dt>
               <dd>{state.settings.data.app.name}</dd>
-              <dt>Version</dt>
+              <dt>版本</dt>
               <dd>{state.health.data.version}</dd>
-              <dt>Environment</dt>
-              <dd>{state.settings.data.app.environment}</dd>
+              <dt>环境</dt>
+              <dd>{labelEnvironment(state.settings.data.app.environment)}</dd>
             </dl>
             <dl>
-              <dt>Database</dt>
-              <dd>{state.settings.data.database.ok ? "OK" : "Unavailable"}</dd>
-              <dt>Migration</dt>
-              <dd>{state.settings.data.database.migration.up_to_date ? "Up to date" : "Needs upgrade"}</dd>
-              <dt>Revision</dt>
+              <dt>数据库</dt>
+              <dd>{state.settings.data.database.ok ? "正常" : "不可用"}</dd>
+              <dt>迁移</dt>
+              <dd>{state.settings.data.database.migration.up_to_date ? "已是最新" : "需要升级"}</dd>
+              <dt>版本号</dt>
               <dd>
-                {state.settings.data.database.migration.current_revision ?? "None"} / {state.settings.data.database.migration.head_revision}
+                {state.settings.data.database.migration.current_revision ?? "无"} / {state.settings.data.database.migration.head_revision}
               </dd>
-              <dt>SQLite Path</dt>
+              <dt>SQLite 路径</dt>
               <dd>{state.settings.data.paths.sqlite_db_path}</dd>
-              <dt>OpenAI Configured</dt>
-              <dd>{state.settings.data.providers.openai_configured ? "Yes" : "No"}</dd>
-              <dt>LLM Provider</dt>
+              <dt>OpenAI 已配置</dt>
+              <dd>{yesNo(state.settings.data.providers.openai_configured)}</dd>
+              <dt>LLM 服务商</dt>
               <dd>{state.settings.data.providers.llm_provider}</dd>
-              <dt>Embedding Provider</dt>
+              <dt>Embedding 服务商</dt>
               <dd>{state.settings.data.providers.embedding_provider}</dd>
-              <dt>Pipeline Worker</dt>
+              <dt>处理工作器</dt>
               <dd>
-                {state.settings.data.pipeline_worker.running ? "Running" : "Stopped"}, concurrency {state.settings.data.pipeline_worker.concurrency}
+                {state.settings.data.pipeline_worker.running ? "运行中" : "已停止"}，并发 {state.settings.data.pipeline_worker.concurrency}
               </dd>
-              <dt>Worker Lease</dt>
+              <dt>工作器租约</dt>
               <dd>{state.settings.data.pipeline_worker.lock_timeout_seconds}s</dd>
             </dl>
             <dl>
-              <dt>Upload Limit</dt>
+              <dt>上传限制</dt>
               <dd>{state.settings.data.limits.max_upload_size_mb} MB</dd>
-              <dt>Parse Limit</dt>
+              <dt>解析限制</dt>
               <dd>
-                {state.settings.data.limits.max_parse_chars} chars, {state.settings.data.limits.max_parse_pages} pages
+                {state.settings.data.limits.max_parse_chars} 字符，{state.settings.data.limits.max_parse_pages} 页
               </dd>
-              <dt>Chunk Limit</dt>
+              <dt>切块限制</dt>
               <dd>
-                {state.settings.data.limits.max_chunk_chars} chars, overlap {state.settings.data.limits.chunk_overlap_chars}
+                {state.settings.data.limits.max_chunk_chars} 字符，重叠 {state.settings.data.limits.chunk_overlap_chars}
               </dd>
-              <dt>RAG Limit</dt>
+              <dt>RAG 限制</dt>
               <dd>
-                top {state.settings.data.limits.rag_top_k}, {state.settings.data.limits.rag_max_context_chars} context chars
+                前 {state.settings.data.limits.rag_top_k} 条，上下文 {state.settings.data.limits.rag_max_context_chars} 字符
               </dd>
-              <dt>Query Rewrite</dt>
+              <dt>查询改写</dt>
               <dd>
-                {state.settings.data.limits.rag_query_rewrite_enabled ? "Enabled" : "Disabled"}, max {state.settings.data.limits.rag_query_rewrite_max_chars} chars
+                {onOff(state.settings.data.limits.rag_query_rewrite_enabled)}，最多 {state.settings.data.limits.rag_query_rewrite_max_chars} 字符
               </dd>
-              <dt>Memory Context</dt>
+              <dt>记忆上下文</dt>
               <dd>
-                {state.settings.data.limits.memory_context_max_chars_per_item} chars each, {state.settings.data.limits.memory_context_max_total_chars} total
+                每条 {state.settings.data.limits.memory_context_max_chars_per_item} 字符，总计 {state.settings.data.limits.memory_context_max_total_chars}
               </dd>
-              <dt>Chat Context</dt>
+              <dt>对话上下文</dt>
               <dd>
-                {state.settings.data.limits.chat_context_recent_messages} messages, {state.settings.data.limits.chat_context_max_chars} chars
+                {state.settings.data.limits.chat_context_recent_messages} 条消息，{state.settings.data.limits.chat_context_max_chars} 字符
               </dd>
-              <dt>Auto Summary</dt>
+              <dt>自动摘要</dt>
               <dd>
-                {state.settings.data.limits.auto_summary_enabled ? "Enabled" : "Disabled"}, {state.settings.data.limits.auto_summary_min_new_messages} new /{" "}
-                {state.settings.data.limits.auto_summary_min_total_messages} total
+                {onOff(state.settings.data.limits.auto_summary_enabled)}，新增 {state.settings.data.limits.auto_summary_min_new_messages} / 总计{" "}
+                {state.settings.data.limits.auto_summary_min_total_messages}
               </dd>
             </dl>
             <dl>
-              <dt>Chroma Collection</dt>
+              <dt>Chroma 集合</dt>
               <dd>{state.index.data.collection_name}</dd>
-              <dt>Vector Path</dt>
+              <dt>向量路径</dt>
               <dd>{state.index.data.persist_path}</dd>
-              <dt>Index Status</dt>
+              <dt>索引状态</dt>
               <dd>
-                {state.index.data.indexed_document_count} docs, {state.index.data.vector_count} vectors
+                {state.index.data.indexed_document_count} 份资料，{state.index.data.vector_count} 个向量
               </dd>
             </dl>
           </div>
@@ -255,8 +256,8 @@ export function SettingsPage() {
             <div className="diagnostic-panel">
               <div className="diagnostic-header">
                 <div>
-                  <p className="eyebrow">Provider Diagnostics</p>
-                  <h2>Connectivity</h2>
+                  <p className="eyebrow">服务商诊断</p>
+                  <h2>连通性</h2>
                 </div>
                 <Zap size={20} />
               </div>
@@ -266,54 +267,54 @@ export function SettingsPage() {
                   <dd>
                     {state.providers.data.llm.provider} / {state.providers.data.llm.model}
                   </dd>
-                  <dt>Configured</dt>
-                  <dd>{state.providers.data.llm.configured ? "Yes" : state.providers.data.llm.reason ?? "No"}</dd>
+                  <dt>已配置</dt>
+                  <dd>{state.providers.data.llm.configured ? "是" : state.providers.data.llm.reason ?? "否"}</dd>
                 </dl>
                 <dl>
                   <dt>Embedding</dt>
                   <dd>
                     {state.providers.data.embedding.provider} / {state.providers.data.embedding.model}
                   </dd>
-                  <dt>Configured</dt>
-                  <dd>{state.providers.data.embedding.configured ? "Yes" : state.providers.data.embedding.reason ?? "No"}</dd>
+                  <dt>已配置</dt>
+                  <dd>{state.providers.data.embedding.configured ? "是" : state.providers.data.embedding.reason ?? "否"}</dd>
                 </dl>
               </div>
               <div className="action-group">
                 <button className="secondary-button" type="button" onClick={() => void runEmbeddingTest()} disabled={busyAction !== null}>
                   <Activity size={16} />
-                  <span>{busyAction === "embedding" ? "Testing" : "Test Embedding"}</span>
+                  <span>{busyAction === "embedding" ? "测试中" : "测试 Embedding"}</span>
                 </button>
                 <button className="secondary-button" type="button" onClick={() => void runLlmTest()} disabled={busyAction !== null}>
                   <Activity size={16} />
-                  <span>{busyAction === "llm" ? "Testing" : "Test LLM"}</span>
+                  <span>{busyAction === "llm" ? "测试中" : "测试 LLM"}</span>
                 </button>
               </div>
               {embeddingTest ? (
                 <div className="diagnostic-result ok">
-                  <strong>Embedding OK</strong>
+                  <strong>Embedding 正常</strong>
                   <span>
-                    {embeddingTest.model}, dimension {embeddingTest.dimension}, {embeddingTest.latency_ms} ms
+                    {embeddingTest.model}，维度 {embeddingTest.dimension}，{embeddingTest.latency_ms} ms
                   </span>
                 </div>
               ) : null}
               {llmTest ? (
                 <div className="diagnostic-result ok">
-                  <strong>LLM OK</strong>
+                  <strong>LLM 正常</strong>
                   <span>
                     {llmTest.model}, {llmTest.latency_ms} ms, {llmTest.response_preview}
                   </span>
                 </div>
               ) : null}
               <div className="diagnostic-list">
-                <strong>Recent Provider Checks</strong>
+                <strong>最近服务商检查</strong>
                 {state.diagnosticHistory.data.items.length ? (
                   state.diagnosticHistory.data.items.map((item) => (
                     <span key={item.id}>
-                      {formatDate(item.created_at)} / {item.provider_kind} / {item.provider}/{item.model} / {item.ok ? "OK" : item.error_message ?? "failed"}
+                      {formatDate(item.created_at)} / {labelProviderKind(item.provider_kind)} / {item.provider}/{item.model} / {item.ok ? "正常" : item.error_message ?? "失败"}
                     </span>
                   ))
                 ) : (
-                  <span>No provider diagnostics recorded</span>
+                  <span>暂无服务商诊断记录</span>
                 )}
               </div>
             </div>
@@ -321,70 +322,70 @@ export function SettingsPage() {
             <div className={state.diagnostics.data.status === "warning" ? "diagnostic-panel warning" : "diagnostic-panel"}>
               <div className="diagnostic-header">
                 <div>
-                  <p className="eyebrow">Index Diagnostics</p>
-                  <h2>{state.diagnostics.data.status === "warning" ? "Warning" : "Healthy"}</h2>
+                  <p className="eyebrow">索引诊断</p>
+                  <h2>{state.diagnostics.data.status === "warning" ? "有警告" : "健康"}</h2>
                 </div>
                 {state.diagnostics.data.status === "warning" ? <AlertTriangle size={20} /> : <Activity size={20} />}
               </div>
               {state.diagnostics.data.warning ? <div className="diagnostic-result warning">{state.diagnostics.data.warning}</div> : null}
               <div className="diagnostic-grid">
                 <dl>
-                  <dt>Collection</dt>
+                  <dt>集合</dt>
                   <dd>{state.diagnostics.data.collection_name}</dd>
-                  <dt>Vectors</dt>
+                  <dt>向量数</dt>
                   <dd>{state.diagnostics.data.vector_count}</dd>
-                  <dt>Dimension</dt>
-                  <dd>{state.diagnostics.data.collection_dimension ?? "Empty"}</dd>
+                  <dt>维度</dt>
+                  <dd>{state.diagnostics.data.collection_dimension ?? "空"}</dd>
                 </dl>
                 <dl>
-                  <dt>Indexed Docs</dt>
+                  <dt>已索引资料</dt>
                   <dd>{state.diagnostics.data.indexed_document_count}</dd>
-                  <dt>DB Dimensions</dt>
-                  <dd>{state.diagnostics.data.db_embedding_dimensions.length ? state.diagnostics.data.db_embedding_dimensions.join(", ") : "None"}</dd>
-                  <dt>Persist Path</dt>
+                  <dt>数据库维度</dt>
+                  <dd>{state.diagnostics.data.db_embedding_dimensions.length ? state.diagnostics.data.db_embedding_dimensions.join(", ") : "无"}</dd>
+                  <dt>持久化路径</dt>
                   <dd>{state.diagnostics.data.persist_path}</dd>
                 </dl>
               </div>
               <div className="diagnostic-list">
-                <strong>Collections</strong>
+                <strong>集合列表</strong>
                 {state.collections.data.items.length ? (
                   state.collections.data.items.map((collection) => (
                     <div key={collection.name} className="collection-row">
                       <span>
                         {collection.name}
-                        {collection.is_current ? " / current" : ""} / {collection.vector_count} vectors / {collection.dimension ?? "empty"} dim / {collection.indexed_document_count} docs
+                        {collection.is_current ? " / 当前" : ""} / {collection.vector_count} 个向量 / {collection.dimension ?? "空"} 维 / {collection.indexed_document_count} 份资料
                       </span>
-                      <button className="icon-button small danger" type="button" title="Reset collection" onClick={() => void resetIndex(collection.name)} disabled={busyAction !== null}>
+                      <button className="icon-button small danger" type="button" title="重置集合" onClick={() => void resetIndex(collection.name)} disabled={busyAction !== null}>
                         <Trash2 size={15} />
                       </button>
                     </div>
                   ))
                 ) : (
-                  <span>No collections found</span>
+                  <span>未找到集合</span>
                 )}
               </div>
               <div className="diagnostic-list">
-                <strong>Provider / Model Distribution</strong>
+                <strong>服务商 / 模型分布</strong>
                 {state.diagnostics.data.provider_model_counts.length ? (
                   state.diagnostics.data.provider_model_counts.map((item) => (
                     <span key={`${item.provider}:${item.model}:${item.status}`}>
-                      {item.provider} / {item.model} / {item.status}: {item.count}
+                      {item.provider} / {item.model} / {labelEmbeddingStatus(item.status)}：{item.count}
                     </span>
                   ))
                 ) : (
-                  <span>No indexed metadata</span>
+                  <span>暂无索引元数据</span>
                 )}
               </div>
               <div className="diagnostic-list">
-                <strong>Recent Failures</strong>
+                <strong>最近失败</strong>
                 {state.diagnostics.data.recent_failures.length ? (
                   state.diagnostics.data.recent_failures.map((failure) => (
                     <span key={`${failure.document_id}:${failure.updated_at}`}>
-                      {formatDate(failure.updated_at)} · {failure.model} · {failure.error_message ?? "failed"}
+                      {formatDate(failure.updated_at)} / {failure.model} / {failure.error_message ?? "失败"}
                     </span>
                   ))
                 ) : (
-                  <span>No recent index failures</span>
+                  <span>最近没有索引失败</span>
                 )}
               </div>
             </div>
@@ -392,18 +393,18 @@ export function SettingsPage() {
 
           <section className="danger-zone">
             <div>
-              <p className="eyebrow">Maintenance</p>
-              <h2>Reset Current Index</h2>
-              <span>Clears Chroma vectors and embedding metadata for the current collection. Documents, parsed text, chunks, chat history, and memory stay untouched.</span>
+              <p className="eyebrow">维护</p>
+              <h2>重置当前索引</h2>
+              <span>清理当前集合的 Chroma 向量和 embedding 元数据。资料、解析文本、切块、聊天记录和记忆都会保留。</span>
             </div>
             <button className="secondary-button danger" type="button" onClick={() => void resetIndex()} disabled={busyAction !== null}>
               {busyAction === "reset" ? <RotateCcw size={16} /> : <Trash2 size={16} />}
-              <span>{busyAction === "reset" ? "Resetting" : "Reset Index"}</span>
+              <span>{busyAction === "reset" ? "重置中" : "重置索引"}</span>
             </button>
           </section>
         </>
       ) : (
-        <div className="empty-panel">{state.status === "loading" ? "Loading status" : state.error}</div>
+        <div className="empty-panel">{state.status === "loading" ? "正在加载状态" : state.error}</div>
       )}
     </section>
   );

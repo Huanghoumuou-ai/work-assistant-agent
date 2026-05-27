@@ -39,18 +39,26 @@ export async function streamChat(
     signal?: AbortSignal;
   },
 ) {
-  const response = await fetch(`${backendUrl}/api/chat/stream`, {
-    method: "POST",
-    headers: {
-      Accept: "text/event-stream",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-    signal: handlers.signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${backendUrl}/api/chat/stream`, {
+      method: "POST",
+      headers: {
+        Accept: "text/event-stream",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: handlers.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
+    throw new Error(error instanceof Error && error.message === "Failed to fetch" ? "连接后端失败" : "网络请求失败");
+  }
 
   if (!response.ok || !response.body) {
-    let message = `Request failed with ${response.status}`;
+    let message = `请求失败：${response.status}`;
     try {
       const body = (await response.json()) as { detail?: { message?: string }; message?: string };
       message = body.detail?.message ?? body.message ?? message;
