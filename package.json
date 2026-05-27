@@ -1,0 +1,13 @@
+{
+  "name": "workmemory-agent",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/desktop"
+  ],
+  "scripts": {
+    "desktop:dev": "npm run dev -w apps/desktop",
+    "desktop:typecheck": "npm run typecheck -w apps/desktop",
+    "desktop:build": "npm run build -w apps/desktop"
+  }
+}
