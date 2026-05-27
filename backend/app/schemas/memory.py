@@ -90,6 +90,16 @@ class MemorySuggestionCreateFromDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class MemorySuggestionCreateFromText(BaseModel):
+    content: str
+    title: str | None = None
+    project_id: str | None = None
+    limit: int | None = None
+    include_memory: bool = True
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class MemorySuggestionOut(BaseModel):
     id: str
     conversation_id: str | None

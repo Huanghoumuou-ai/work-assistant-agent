@@ -1,7 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, CheckCircle2, RefreshCw, RotateCcw, Save, Search, X, XCircle } from "lucide-react";
+import { Archive, CheckCircle2, Lightbulb, RefreshCw, RotateCcw, Save, Search, X, XCircle } from "lucide-react";
 
-import { acceptMemorySuggestion, createMemory, getMemories, getMemorySuggestions, rejectMemorySuggestion, searchMemories, updateMemory, updateMemoryStatus } from "../api/memory.api";
+import {
+  acceptMemorySuggestion,
+  createMemory,
+  generateMemorySuggestionsFromText,
+  getMemories,
+  getMemorySuggestions,
+  rejectMemorySuggestion,
+  searchMemories,
+  updateMemory,
+  updateMemoryStatus,
+} from "../api/memory.api";
 import { getProjects } from "../api/projects.api";
 import type { MemoryItem, MemorySearchItem, MemoryStatus, MemoryStatusFilter, MemorySuggestion, MemoryType, ProjectItem } from "../types/api";
 import { formatDate } from "../utils/formatDate";
@@ -9,7 +19,7 @@ import { formatDate } from "../utils/formatDate";
 const PAGE_SIZE = 10;
 const MEMORY_TYPES: MemoryType[] = ["note", "requirement", "decision", "rule"];
 
-type BusyAction = "load" | "save" | "search" | `status:${string}` | `suggestion:${string}` | null;
+type BusyAction = "load" | "save" | "search" | "textSuggestion" | `status:${string}` | `suggestion:${string}` | null;
 
 interface MemoryFormState {
   projectId: string;
@@ -57,6 +67,9 @@ function suggestionSourceLabel(suggestion: MemorySuggestion) {
   if (suggestion.source_type === "document_suggestion") {
     return suggestion.source_ref ? `Document ${suggestion.source_ref}` : "Document";
   }
+  if (suggestion.source_type === "text_suggestion") {
+    return suggestion.source_ref ? `Text ${suggestion.source_ref}` : "Text";
+  }
   return suggestion.source_ref ? `${suggestion.source_type} ${suggestion.source_ref}` : suggestion.source_type;
 }
 
@@ -77,6 +90,11 @@ export function MemoryPage() {
   const [searchIncludeArchived, setSearchIncludeArchived] = useState(false);
   const [searchLimit, setSearchLimit] = useState(5);
   const [searchResults, setSearchResults] = useState<MemorySearchItem[]>([]);
+  const [suggestionTitle, setSuggestionTitle] = useState("");
+  const [suggestionProjectId, setSuggestionProjectId] = useState("");
+  const [suggestionText, setSuggestionText] = useState("");
+  const [suggestionIncludeMemory, setSuggestionIncludeMemory] = useState(true);
+  const [suggestionLimit, setSuggestionLimit] = useState(5);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<MemoryFormState>(emptyForm);
   const [busy, setBusy] = useState<BusyAction>("load");
@@ -250,6 +268,32 @@ export function MemoryPage() {
     }
   };
 
+  const generateFromText = async () => {
+    const cleanText = suggestionText.trim();
+    if (busy !== null || !cleanText) {
+      setMessage("Text content is required");
+      return;
+    }
+    setBusy("textSuggestion");
+    setMessage(null);
+    try {
+      const response = await generateMemorySuggestionsFromText({
+        title: suggestionTitle.trim() || null,
+        content: cleanText,
+        project_id: suggestionProjectId || null,
+        limit: suggestionLimit,
+        include_memory: suggestionIncludeMemory,
+      });
+      await loadSuggestions();
+      setSuggestionText("");
+      setMessage(`Generated ${response.data.total} pending work suggestion${response.data.total === 1 ? "" : "s"} for review`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Text suggestion generation failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   useEffect(() => {
     void refresh(offset);
   }, [offset, projectFilter, typeFilter, statusFilter]);
@@ -308,6 +352,45 @@ export function MemoryPage() {
           </div>
         )}
       </section>
+
+      <div className="memory-form">
+        <label>
+          <span>Suggestion Project</span>
+          <select value={suggestionProjectId} onChange={(event) => setSuggestionProjectId(event.target.value)} disabled={busy !== null}>
+            <option value="">Unfiled</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Include Memory</span>
+          <select value={suggestionIncludeMemory ? "on" : "off"} onChange={(event) => setSuggestionIncludeMemory(event.target.value === "on")} disabled={busy !== null}>
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <label>
+          <span>Limit</span>
+          <input type="number" min={1} max={10} value={suggestionLimit} onChange={(event) => setSuggestionLimit(Number(event.target.value))} disabled={busy !== null} />
+        </label>
+        <label className="memory-title">
+          <span>Suggestion Title</span>
+          <input value={suggestionTitle} onChange={(event) => setSuggestionTitle(event.target.value)} disabled={busy !== null} />
+        </label>
+        <label className="memory-content">
+          <span>Text</span>
+          <textarea value={suggestionText} onChange={(event) => setSuggestionText(event.target.value)} disabled={busy !== null} />
+        </label>
+        <div className="memory-form-actions">
+          <button className="secondary-button" type="button" onClick={() => void generateFromText()} disabled={busy !== null || !suggestionText.trim()}>
+            <Lightbulb size={16} />
+            <span>{busy === "textSuggestion" ? "Generating" : "Generate Suggestions"}</span>
+          </button>
+        </div>
+      </div>
 
       <div className="memory-form" ref={formRef}>
         <label>

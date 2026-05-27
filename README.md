@@ -6,6 +6,7 @@ WorkMemory now supports an audited suggestion flow that matches the local-first 
 
 - Chat conversations can generate pending Memory suggestions.
 - Parsed uploaded files and pasted-text documents can generate pending Memory suggestions.
+- Free-form pasted text can generate pending Memory suggestions from the Memory page, optionally using existing active Memory as context.
 - Suggestions use the configured chat provider only when the user clicks the action.
 - Suggestions are stored in SQLite as `pending` records and do not enter active Memory automatically.
 - The Memory page lets the user accept a suggestion into active Memory or reject it.
@@ -17,6 +18,7 @@ New APIs:
 
 - `POST /api/memory/suggestions/from-conversation`
 - `POST /api/memory/suggestions/from-document`
+- `POST /api/memory/suggestions/from-text`
 - `GET /api/memory/suggestions`
 - `POST /api/memory/suggestions/{suggestion_id}/accept`
 - `POST /api/memory/suggestions/{suggestion_id}/reject`

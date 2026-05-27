@@ -12,6 +12,7 @@ from backend.app.schemas.memory import (
     MemoryStatusUpdate,
     MemorySuggestionCreateFromConversation,
     MemorySuggestionCreateFromDocument,
+    MemorySuggestionCreateFromText,
     MemoryUpdate,
 )
 from backend.app.services.memory_service import (
@@ -20,6 +21,7 @@ from backend.app.services.memory_service import (
     create_memory,
     generate_memory_suggestions_from_conversation,
     generate_memory_suggestions_from_document,
+    generate_memory_suggestions_from_text,
     get_memory,
     list_memories,
     list_memory_suggestions,
@@ -106,6 +108,24 @@ async def post_memory_suggestions_from_document(payload: MemorySuggestionCreateF
     result = generate_memory_suggestions_from_document(
         db,
         payload.document_id,
+        limit=payload.limit,
+        include_memory=payload.include_memory,
+    )
+    return {
+        "success": True,
+        "code": "OK",
+        "message": "Memory suggestions generated.",
+        "data": result.model_dump(mode="json"),
+    }
+
+
+@router.post("/memory/suggestions/from-text", status_code=202)
+async def post_memory_suggestions_from_text(payload: MemorySuggestionCreateFromText, db: Session = Depends(get_db)) -> dict:
+    result = generate_memory_suggestions_from_text(
+        db,
+        content=payload.content,
+        title=payload.title,
+        project_id=payload.project_id,
         limit=payload.limit,
         include_memory=payload.include_memory,
     )

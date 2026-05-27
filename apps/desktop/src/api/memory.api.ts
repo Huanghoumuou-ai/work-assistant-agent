@@ -38,6 +38,14 @@ export interface MemorySearchPayload {
   include_archived?: boolean;
 }
 
+export interface MemorySuggestionTextPayload {
+  content: string;
+  title?: string | null;
+  project_id?: string | null;
+  limit?: number;
+  include_memory?: boolean;
+}
+
 export function getMemories(query: MemoryQuery) {
   const params = new URLSearchParams({
     limit: String(query.limit),
@@ -90,6 +98,10 @@ export function generateMemorySuggestionsFromConversation(conversationId: string
 
 export function generateMemorySuggestionsFromDocument(documentId: string, limit = 5, includeMemory = true) {
   return postJson<ApiResponse<MemorySuggestionBatch>>("/api/memory/suggestions/from-document", { document_id: documentId, limit, include_memory: includeMemory });
+}
+
+export function generateMemorySuggestionsFromText(payload: MemorySuggestionTextPayload) {
+  return postJson<ApiResponse<MemorySuggestionBatch>>("/api/memory/suggestions/from-text", payload);
 }
 
 export function acceptMemorySuggestion(suggestionId: string) {

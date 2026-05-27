@@ -377,6 +377,14 @@ def _parse_suggestion_items(raw: str, limit: int) -> list[dict[str, str]]:
     return items
 
 
+def _ensure_suggestion_provider():
+    provider = get_chat_provider()
+    provider_info = provider.info
+    if provider_info.provider == "openai" and not provider_info.configured:
+        raise _bad_request("OPENAI_API_KEY must be configured when LLM_PROVIDER=openai.")
+    return provider
+
+
 def generate_memory_suggestions_from_conversation(db: Session, conversation_id: str, limit: int | None = None) -> MemorySuggestionBatchOut:
     conversation = _conversation_or_error(db, conversation_id)
     suggestion_limit = _suggestion_limit(limit)
@@ -384,10 +392,7 @@ def generate_memory_suggestions_from_conversation(db: Session, conversation_id: 
     if not lines:
         raise _bad_request("Conversation has no messages.")
 
-    provider = get_chat_provider()
-    provider_info = provider.info
-    if provider_info.provider == "openai" and not provider_info.configured:
-        raise _bad_request("OPENAI_API_KEY must be configured when LLM_PROVIDER=openai.")
+    provider = _ensure_suggestion_provider()
 
     try:
         memory_context = _active_memory_context(db, conversation.project_id)
@@ -472,10 +477,7 @@ def generate_memory_suggestions_from_document(
         raise _bad_request("Document must be parsed before generating memory suggestions.")
 
     suggestion_limit = _suggestion_limit(limit)
-    provider = get_chat_provider()
-    provider_info = provider.info
-    if provider_info.provider == "openai" and not provider_info.configured:
-        raise _bad_request("OPENAI_API_KEY must be configured when LLM_PROVIDER=openai.")
+    provider = _ensure_suggestion_provider()
 
     document_text = _document_text_for_suggestions(document, parse_result)
     memory_context = _active_memory_context(db, document.project_id) if include_memory else ""
@@ -507,6 +509,65 @@ def generate_memory_suggestions_from_document(
             status="pending",
             source_type="document_suggestion",
             source_ref=document.id,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(suggestion)
+        suggestions.append(suggestion)
+    db.commit()
+    for suggestion in suggestions:
+        db.refresh(suggestion)
+    return MemorySuggestionBatchOut(items=[suggestion_payload(db, item) for item in suggestions], total=len(suggestions))
+
+
+def generate_memory_suggestions_from_text(
+    db: Session,
+    *,
+    content: str,
+    title: str | None = None,
+    project_id: str | None = None,
+    limit: int | None = None,
+    include_memory: bool = True,
+) -> MemorySuggestionBatchOut:
+    clean_content = _require_trimmed(content, field="content", max_length=12000)
+    clean_title = title.strip() if title else ""
+    if len(clean_title) > 120:
+        raise _bad_request("title is too long.")
+    project = _ensure_project(db, project_id)
+    clean_project_id = project.id if project is not None else None
+    suggestion_limit = _suggestion_limit(limit)
+    provider = _ensure_suggestion_provider()
+    memory_context = _active_memory_context(db, clean_project_id) if include_memory else ""
+
+    try:
+        completion = provider.complete(
+            _build_suggestion_messages(
+                [clean_content],
+                suggestion_limit,
+                source_label=f"text:{clean_title or 'untitled'}",
+                memory_context=memory_context,
+            )
+        )
+        items = _parse_suggestion_items(completion.content, suggestion_limit)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise _bad_request("Memory suggestion generation failed.") from error
+
+    now = datetime.now(timezone.utc)
+    source_ref = clean_title[:100] if clean_title else None
+    suggestions: list[MemorySuggestion] = []
+    for item in items:
+        suggestion = MemorySuggestion(
+            conversation_id=None,
+            project_id=clean_project_id,
+            type=item["type"],
+            title=item["title"],
+            content=item["content"],
+            rationale=item["rationale"] or None,
+            status="pending",
+            source_type="text_suggestion",
+            source_ref=source_ref,
             created_at=now,
             updated_at=now,
         )

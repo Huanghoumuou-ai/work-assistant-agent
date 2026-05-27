@@ -332,6 +332,45 @@ def test_generate_memory_suggestions_from_document_uses_parsed_text_and_existing
     assert suggestions[0]["status"] == "pending"
 
 
+def test_generate_memory_suggestions_from_text_uses_project_and_does_not_write_memory(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _use_fake_stack(monkeypatch)
+    with TestClient(app) as client:
+        project = client.post("/api/projects", json={"name": "Suggestion Text Project"}).json()["data"]
+    _create_memory({"project_id": project["id"], "type": "note", "title": "Existing context", "content": "Use the launch checklist."})
+    before_memory = _memory_count()
+
+    with TestClient(app) as client:
+        generated = client.post(
+            "/api/memory/suggestions/from-text",
+            json={
+                "title": "Launch notes",
+                "content": "Launch notes say support needs a rollback checklist and owner.",
+                "project_id": project["id"],
+                "limit": 2,
+                "include_memory": True,
+            },
+        )
+
+    assert generated.status_code == 202
+    suggestions = generated.json()["data"]["items"]
+    assert suggestions
+    assert suggestions[0]["source_type"] == "text_suggestion"
+    assert suggestions[0]["source_ref"] == "Launch notes"
+    assert suggestions[0]["project_id"] == project["id"]
+    assert suggestions[0]["status"] == "pending"
+    assert _memory_count() == before_memory
+
+
+def test_generate_memory_suggestions_from_text_validates_content_and_project(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _use_fake_stack(monkeypatch)
+    with TestClient(app) as client:
+        empty = client.post("/api/memory/suggestions/from-text", json={"content": "   "})
+        missing_project = client.post("/api/memory/suggestions/from-text", json={"content": "useful text", "project_id": "missing"})
+
+    assert empty.status_code == 400
+    assert missing_project.status_code == 400
+
+
 def test_memory_suggestion_generation_requires_parsed_uploaded_document(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     _use_fake_stack(monkeypatch)
     with TestClient(app) as client:
