@@ -623,6 +623,12 @@ textarea:disabled {
   font-size: 0.86rem;
 }
 
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .source-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
@@ -708,6 +714,16 @@ textarea:disabled {
 .send-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.send-button.stop {
+  background: var(--danger);
+}
+
+.compact-button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.82rem;
 }
 
 .conversation-panel {

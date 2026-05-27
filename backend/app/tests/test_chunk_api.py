@@ -229,6 +229,35 @@ def test_max_chunks_truncates_result(monkeypatch) -> None:
     assert len(_chunk_rows(document["id"])) == 2
 
 
+def test_markdown_headings_start_new_chunks(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "max_chunk_chars", 80)
+    monkeypatch.setattr(settings, "chunk_overlap_chars", 0)
+    document = _upload("heading-aware.md", b"# One\nalpha paragraph\n\n# Two\nbeta paragraph")
+    _parse(document["id"])
+
+    response = _chunk(document["id"])
+
+    assert response.status_code == 200
+    chunks = _chunk_rows(document["id"])
+    assert [chunk.content for chunk in chunks] == ["# One\nalpha paragraph", "# Two\nbeta paragraph"]
+    assert response.json()["data"]["chunker_name"] == "paragraph-markdown-boundary-chunker"
+    assert response.json()["data"]["chunker_version"] == "2"
+
+
+def test_paragraph_boundaries_are_preferred(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "max_chunk_chars", 45)
+    monkeypatch.setattr(settings, "chunk_overlap_chars", 0)
+    document = _upload("paragraph-aware.md", b"first paragraph stays together\n\nsecond paragraph stays together\n\nthird")
+    _parse(document["id"])
+
+    response = _chunk(document["id"])
+
+    assert response.status_code == 200
+    chunks = _chunk_rows(document["id"])
+    assert chunks[0].content == "first paragraph stays together"
+    assert chunks[1].content == "second paragraph stays together\n\nthird"
+
+
 def test_chunking_db_failure_rolls_back_partial_chunks(monkeypatch) -> None:
     document = _upload("chunk-db-failure.md", b"db failure chunks")
     _parse(document["id"])

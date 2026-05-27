@@ -201,6 +201,7 @@ API 不返回 parsed text 正文。
   - 移除控制字符。
   - 去除行尾空白。
   - 压缩过多空行。
+- 切块器为 deterministic v2：优先按 Markdown 标题和段落空行边界组块，单个长段落再退回字符边界切分。
 - 清洗后文本为空视为成功，`chunk_count=0`。
 - 重新 chunk 前删除旧 chunks。
 - 删除旧 chunks、插入新 chunks、写 chunk_result 在同一事务里完成。
@@ -303,10 +304,16 @@ Chat 页面是当前主交互入口。
 - Shift+Enter 换行。
 - 默认调用真实 Chat/RAG，保存对话历史。
 - 支持 SSE 流式输出。
+- 支持前端 Stop generating；中断时不保存不完整 assistant message。
 - AI 思考时有等待动画。
 - AI 回答生成中会实时追加文本。
 - 回答完成后保存 user message 和 assistant message。
 - assistant message 保存 provider、model、sources。
+- 支持重新生成当前最新 assistant answer。
+- 支持复制 answer。
+- 支持复制文档引用和 Memory 引用。
+- 支持对话重命名。
+- 支持对话删除；会同时删除该 conversation 的 messages 和 summary。
 - sources 默认展示紧凑摘要：
   - `【1】：摘要内容--filename.md`
   - `【2】：摘要内容--filename.md`
@@ -319,6 +326,9 @@ Chat 页面是当前主交互入口。
 - `POST /api/chat/stream`
 - `GET /api/conversations`
 - `GET /api/conversations/{conversation_id}`
+- `PATCH /api/conversations/{conversation_id}`
+- `DELETE /api/conversations/{conversation_id}`
+- `POST /api/conversations/{conversation_id}/regenerate`
 - `GET /api/conversations/{conversation_id}/messages`
 
 当前前端主要使用 `/api/chat/stream`。
@@ -405,10 +415,6 @@ Memory 规则：
 - Pipeline 任务暂停/恢复。
 - Pipeline 任务强制终止当前步骤。
 - 精确到 token/页/行级别的真实进度百分比。
-- 批量取消任务。
-- 批量重试失败任务。
-- 对话删除。
-- 对话重命名。
 - 消息编辑。
 - 消息删除。
 - 真正的多轮工具调用 agent。
@@ -460,15 +466,15 @@ Memory 规则：
 - 默认并发为 1，避免本地多个大文件同时解析和索引造成资源争用。
 - 已有任务取消，但只是步骤边界取消：running job 不会强杀当前 parse/chunk/index 步骤。
 - 已有进度百分比，但只是阶段级固定映射，不是按页数、行数、token 数精确计算。
-- 已有 job event 时间线，但还没有 SSE 实时推送。
-- failed/canceled/succeeded 后可以创建新 job 重试或重处理，但还没有批量取消、批量重试。
+- 已有 job event 时间线，并通过 SSE 实时推送；前端仍保留轮询作为兜底。
+- failed/canceled/succeeded 后可以创建新 job 重试或重处理，也支持可见任务的批量取消、批量重试。
 
 后续应增加：
 
 - 更强的外部任务队列或独立 worker 进程。
 - 任务取消的细粒度协作机制。
 - 进度事件 SSE 推送。
-- 批量取消和批量重试。
+- 更细粒度的任务进度事件和任务取消协作。
 
 ### 3. Index 依赖 embedding provider 和 Chroma 状态
 
@@ -502,18 +508,18 @@ CHROMA_COLLECTION_NAME=新的_collection_name
 
 ### 5. Retrieval 和 RAG 质量依赖 chunk 与 embedding
 
-当前 chunker 是简单 deterministic 字符切块，不理解章节结构。
+当前 chunker 已经从简单字符切块升级为 deterministic 的 Markdown/段落边界优先切块；它仍然不是完整结构化文档理解。
 
 影响：
 
 - PDF 解析出来的文本可能顺序不理想。
 - 表格内容可能丢失结构。
-- chunk 可能截断语义段落。
+- 超长段落仍可能被字符边界截断。
 - 检索命中可能不稳定。
 
 后续应改进：
 
-- Markdown/标题感知切块。
+- 更强的 Markdown/标题层级切块。
 - 表格结构保留。
 - PDF 页面号和段落位置信息。
 - reranker。
@@ -522,11 +528,11 @@ CHROMA_COLLECTION_NAME=新的_collection_name
 
 ### 6. Chat 流式输出还没有取消和恢复
 
-当前已实现 SSE 流式输出，但还不完整。
+当前已实现 SSE 流式输出和前端 Stop generating，但还不完整。
 
 不足：
 
-- 没有 Stop generating 按钮。
+- Stop generating 通过前端中断请求实现；后端不会保存不完整 assistant message。
 - 流式中断后没有断点续传。
 - 如果 LLM 在输出中途失败，当前 partial answer 不会保存为正式 assistant message。
 - SSE error 是事件级错误，不一定表现为 HTTP 4xx。
@@ -578,8 +584,8 @@ CHROMA_COLLECTION_NAME=新的_collection_name
 已经做过一轮布局优化，但仍有不足：
 
 - Documents 表格在文档很多时还不够高效。
-- Pipeline Jobs 已有基础任务面板，但还没有批量取消、批量重试和任务优先级。
-- Chat 缺少停止生成、重试、复制、重新生成。
+- Pipeline Jobs 已有任务面板、任务优先级、批量取消和批量重试；大量任务场景下的筛选和操作效率还可以继续优化。
+- Chat 已有停止生成、重新生成、复制、对话重命名和对话删除；仍缺少消息级编辑/删除和更完整的引用侧边栏。
 - Memory 页面可以进一步卡片化和提升扫描效率。
 - Settings 已有 provider 连通性测试和 index reset，但还没有诊断历史记录。
 
@@ -1172,7 +1178,7 @@ npm run build -w apps/desktop
 最近一次实际验证：
 
 - 后端全量 pytest：`161 passed`
-- Alembic 迁移检查：`check_migrations.py` 显示 `current_revision=20260509_0002` 且 `up_to_date=True`
+- Alembic 迁移检查：`check_migrations.py` 显示 `current_revision=20260518_0003` 且 `up_to_date=True`
 - Alembic CLI：`.venv\Scripts\python -m alembic -c backend\alembic.ini upgrade head` 可重复执行
 - Python 依赖检查：`pip check` 通过
 - 桌面端 typecheck：通过
@@ -1184,23 +1190,20 @@ npm run build -w apps/desktop
 
 1. 后续表结构变化必须补 Alembic revision，并逐步补旧开发库的显式迁移。
 2. 增加独立 worker 进程或外部任务队列，承接 Parse/Chunk/Index/Summary。
-3. 增加 Pipeline 批量取消、批量重试和更细粒度进度推送。
+3. 继续增强 Pipeline 更细粒度进度推送和任务取消协作。
 4. 增加 Chroma 多 collection 管理。
 5. 增加 provider 真实可用性监控和历史诊断记录。
 
 ### P1：Chat 体验
 
-1. Stop generating。
-2. Regenerate response。
-3. Copy answer。
-4. Copy source citation。
-5. 对话重命名。
-6. 对话删除。
-7. 引用侧边栏。
+1. 消息编辑/删除。
+2. 更完整的引用侧边栏。
+3. 流式中断后的恢复策略。
+4. 更细粒度的 regenerate 入口，例如指定某条 user message。
 
 ### P2：RAG 质量
 
-1. 章节感知 chunker。
+1. 更强的章节层级 chunker。
 2. 表格结构化解析。
 3. PDF 页码和页内定位。
 4. reranker。

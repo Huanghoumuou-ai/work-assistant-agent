@@ -1,4 +1,4 @@
-import { backendUrl, getJson, postJson } from "./client";
+import { backendUrl, deleteJson, getJson, patchJson, postJson } from "./client";
 import type { ApiResponse, ChatResponse, ConversationItem, ConversationList, ConversationMessages, ConversationSummary } from "../types/api";
 
 export interface ChatPayload {
@@ -11,6 +11,8 @@ export interface ChatPayload {
   memory_limit?: number;
   auto_summary?: boolean;
 }
+
+export type RegeneratePayload = Omit<ChatPayload, "conversation_id" | "query">;
 
 export function postChat(payload: ChatPayload) {
   return postJson<ApiResponse<ChatResponse>>("/api/chat", payload);
@@ -114,4 +116,16 @@ export function getConversationSummary(conversationId: string) {
 
 export function generateConversationSummary(conversationId: string) {
   return postJson<ApiResponse<ConversationSummary>>(`/api/conversations/${conversationId}/summary`, {});
+}
+
+export function updateConversationTitle(conversationId: string, title: string) {
+  return patchJson<ApiResponse<ConversationItem>>(`/api/conversations/${conversationId}`, { title });
+}
+
+export function deleteConversation(conversationId: string) {
+  return deleteJson<ApiResponse<{ id: string }>>(`/api/conversations/${conversationId}`);
+}
+
+export function regenerateConversation(conversationId: string, payload: RegeneratePayload) {
+  return postJson<ApiResponse<ChatResponse>>(`/api/conversations/${conversationId}/regenerate`, payload);
 }

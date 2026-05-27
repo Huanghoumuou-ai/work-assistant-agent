@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from backend.app.core.config import settings
-from backend.app.db.models import Conversation, Message
+from backend.app.db.models import Conversation, ConversationSummary, Message
 from backend.app.db.session import SessionLocal
 from backend.app.main import app
 from backend.app.services import chat_service
@@ -202,6 +202,84 @@ def test_conversation_list_and_detail_endpoints(monkeypatch) -> None:  # type: i
     assert detail.json()["data"]["id"] == second["id"]
     assert messages.status_code == 200
     assert len(messages.json()["data"]["messages"]) == 2
+
+
+def test_conversation_can_be_renamed(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _use_fake_stack(monkeypatch)
+    conversation = _post_chat({"query": "rename me"}).json()["data"]["conversation"]
+
+    with TestClient(app) as client:
+        response = client.patch(f"/api/conversations/{conversation['id']}", json={"title": "  Better title  "})
+
+    assert response.status_code == 200
+    assert response.json()["data"]["title"] == "Better title"
+
+
+def test_conversation_rename_rejects_empty_title(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _use_fake_stack(monkeypatch)
+    conversation = _post_chat({"query": "rename empty"}).json()["data"]["conversation"]
+
+    with TestClient(app) as client:
+        response = client.patch(f"/api/conversations/{conversation['id']}", json={"title": "   "})
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["message"] == "title is required."
+
+
+def test_delete_conversation_removes_messages_and_summary(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _use_fake_stack(monkeypatch)
+    conversation = _post_chat({"query": "delete me"}).json()["data"]["conversation"]
+    conversation_id = conversation["id"]
+    with SessionLocal() as db:
+        db.add(
+            ConversationSummary(
+                conversation_id=conversation_id,
+                status="summarized",
+                summary="summary",
+                message_count=2,
+            )
+        )
+        db.commit()
+
+    with TestClient(app) as client:
+        response = client.delete(f"/api/conversations/{conversation_id}")
+        messages = client.get(f"/api/conversations/{conversation_id}/messages")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["id"] == conversation_id
+    assert messages.status_code == 404
+    with SessionLocal() as db:
+        assert db.get(Conversation, conversation_id) is None
+        assert db.query(Message).filter(Message.conversation_id == conversation_id).count() == 0
+        assert db.get(ConversationSummary, conversation_id) is None
+
+
+def test_regenerate_replaces_latest_assistant_message(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _use_fake_stack(monkeypatch)
+    first = _post_chat({"query": "regenerate latest"}).json()["data"]
+    conversation_id = first["conversation"]["id"]
+    old_assistant_id = first["assistant_message"]["id"]
+
+    with TestClient(app) as client:
+        response = client.post(f"/api/conversations/{conversation_id}/regenerate", json={})
+        messages = client.get(f"/api/conversations/{conversation_id}/messages")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["user_message"]["content"] == "regenerate latest"
+    assert data["assistant_message"]["id"] != old_assistant_id
+    message_items = messages.json()["data"]["messages"]
+    assert [item["role"] for item in message_items] == ["user", "assistant"]
+    assert message_items[-1]["id"] == data["assistant_message"]["id"]
+
+
+def test_regenerate_missing_conversation_returns_404(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _use_fake_stack(monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.post(f"/api/conversations/{uuid4()}/regenerate", json={})
+
+    assert response.status_code == 404
 
 
 def test_sources_json_v2_old_array_and_invalid_json_are_compatible() -> None:

@@ -7,10 +7,10 @@ from json import JSONDecodeError
 from typing import Iterator
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from backend.app.db.models import Conversation, Message
+from backend.app.db.models import Conversation, ConversationSummary, Message
 from backend.app.schemas.chat import ChatResponseOut, ConversationListOut, ConversationMessagesOut, ConversationOut, MessageOut
 from backend.app.schemas.rag import RagSearchOut
 from backend.app.schemas.rag import MemorySourceOut, RagSourceOut
@@ -53,6 +53,15 @@ def _title_from_query(query: str) -> str:
     if len(title) <= 60:
         return title
     return title[:60].rstrip()
+
+
+def _validate_conversation_title(title: str) -> str:
+    clean = " ".join(title.split())
+    if not clean:
+        raise _bad_request("title is required.")
+    if len(clean) > 120:
+        raise _bad_request("title is too long.")
+    return clean
 
 
 def _safe_rag_source(value: object) -> RagSourceOut | None:
@@ -351,6 +360,52 @@ def save_chat_turn(
     )
 
 
+def save_regenerated_assistant_turn(
+    db: Session,
+    *,
+    conversation: Conversation,
+    user_message: Message,
+    rag_result: RagSearchOut,
+    auto_summary: bool,
+) -> ChatResponseOut:
+    now = datetime.now(timezone.utc)
+    try:
+        conversation.updated_at = now
+        assistant_message = Message(
+            conversation_id=conversation.id,
+            role="assistant",
+            content=rag_result.answer,
+            sources_json=json.dumps(
+                {
+                    "version": 2,
+                    "documents": [source.model_dump(mode="json") for source in rag_result.sources],
+                    "memories": [source.model_dump(mode="json") for source in rag_result.memory_sources],
+                },
+                ensure_ascii=False,
+            ),
+            provider=rag_result.provider,
+            model=rag_result.model,
+            created_at=now,
+        )
+        db.add(assistant_message)
+        db.commit()
+        db.refresh(conversation)
+        db.refresh(user_message)
+        db.refresh(assistant_message)
+    except Exception:
+        db.rollback()
+        raise
+
+    summary = maybe_auto_refresh_summary(db, conversation.id, requested=auto_summary)
+
+    return ChatResponseOut(
+        conversation=ConversationOut.model_validate(conversation),
+        user_message=_message_out(user_message),
+        assistant_message=_message_out(assistant_message),
+        summary=summary,
+    )
+
+
 def list_conversations(db: Session, *, limit: int, offset: int) -> ConversationListOut:
     total = db.execute(select(func.count()).select_from(Conversation)).scalar_one()
     items = db.execute(
@@ -372,6 +427,104 @@ def get_conversation(db: Session, conversation_id: str) -> ConversationOut:
     if conversation is None:
         raise _not_found("Conversation not found.")
     return ConversationOut.model_validate(conversation)
+
+
+def update_conversation_title(db: Session, conversation_id: str, title: str) -> ConversationOut:
+    conversation = db.get(Conversation, conversation_id)
+    if conversation is None:
+        raise _not_found("Conversation not found.")
+    conversation.title = _validate_conversation_title(title)
+    conversation.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(conversation)
+    return ConversationOut.model_validate(conversation)
+
+
+def delete_conversation(db: Session, conversation_id: str) -> str:
+    conversation = db.get(Conversation, conversation_id)
+    if conversation is None:
+        raise _not_found("Conversation not found.")
+    try:
+        db.execute(delete(ConversationSummary).where(ConversationSummary.conversation_id == conversation_id))
+        db.execute(delete(Message).where(Message.conversation_id == conversation_id))
+        db.delete(conversation)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return conversation_id
+
+
+def regenerate_latest_assistant(
+    db: Session,
+    *,
+    conversation_id: str,
+    top_k: int | None = None,
+    project_id: str | None = None,
+    document_id: str | None = None,
+    include_memory: bool = False,
+    memory_limit: int | None = None,
+    auto_summary: bool = False,
+) -> ChatResponseOut:
+    conversation = db.get(Conversation, conversation_id)
+    if conversation is None:
+        raise _not_found("Conversation not found.")
+
+    messages = db.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc(), Message.id.asc())
+    ).scalars().all()
+    if not messages:
+        raise _bad_request("Conversation has no messages.")
+
+    last_user_index = next((index for index in range(len(messages) - 1, -1, -1) if messages[index].role == "user"), None)
+    if last_user_index is None:
+        raise _bad_request("Conversation has no user message to regenerate.")
+    user_message = messages[last_user_index]
+
+    trailing_messages = messages[last_user_index + 1 :]
+    if trailing_messages and any(message.role != "assistant" for message in trailing_messages):
+        raise _bad_request("Only the latest assistant response can be regenerated.")
+
+    try:
+        for message in trailing_messages:
+            db.delete(message)
+        if trailing_messages:
+            db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    conversation_context = build_conversation_context(db, conversation.id)
+    clean_project_id = _clean_optional_id(project_id) or conversation.project_id
+    clean_document_id = _clean_optional_id(document_id)
+    try:
+        rag_result = answer_rag(
+            db,
+            query=user_message.content,
+            top_k=top_k,
+            project_id=clean_project_id,
+            document_id=clean_document_id,
+            include_memory=include_memory,
+            memory_limit=memory_limit,
+            conversation_context=conversation_context,
+        )
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as error:
+        db.rollback()
+        logger.exception("Chat answer regeneration failed.")
+        raise _bad_request("Chat answer regeneration failed.") from error
+
+    return save_regenerated_assistant_turn(
+        db,
+        conversation=conversation,
+        user_message=user_message,
+        rag_result=rag_result,
+        auto_summary=auto_summary,
+    )
 
 
 def get_conversation_messages(db: Session, conversation_id: str) -> ConversationMessagesOut:

@@ -19,10 +19,11 @@ from backend.app.services.parse_service import safe_parsed_file_path
 logger = logging.getLogger(__name__)
 CLEANER_NAME = "deterministic-text-cleaner"
 CLEANER_VERSION = "1"
-CHUNKER_NAME = "character-boundary-chunker"
-CHUNKER_VERSION = "1"
+CHUNKER_NAME = "paragraph-markdown-boundary-chunker"
+CHUNKER_VERSION = "2"
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 EXCESS_BLANK_LINES = re.compile(r"\n{3,}")
+MARKDOWN_HEADING = re.compile(r"^#{1,6}\s+\S")
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,14 @@ class PreparedChunk:
     content: str
     char_start: int
     char_end: int
+
+
+@dataclass(frozen=True)
+class TextBlock:
+    content: str
+    char_start: int
+    char_end: int
+    is_heading: bool = False
 
 
 def _api_error(status_code: int, code: str, message: str) -> HTTPException:
@@ -134,6 +143,109 @@ def split_text_into_chunks(text: str, max_chunk_chars: int, overlap_chars: int, 
         if next_start <= start:
             next_start = end
         start = next_start
+
+    return chunks, truncated
+
+
+def _text_blocks(text: str) -> list[TextBlock]:
+    blocks: list[TextBlock] = []
+    cursor = 0
+    for match in re.finditer(r"\S(?:.*?)(?=\n\n|\Z)", text, flags=re.DOTALL):
+        raw_start, raw_end = match.span()
+        start, end = _trim_chunk_bounds(text, raw_start, raw_end)
+        cursor = raw_end
+        if start >= end:
+            continue
+        content = text[start:end]
+        first_line = content.split("\n", 1)[0]
+        blocks.append(
+            TextBlock(
+                content=content,
+                char_start=start,
+                char_end=end,
+                is_heading=bool(MARKDOWN_HEADING.match(first_line)),
+            )
+        )
+    if not blocks and cursor < len(text):
+        start, end = _trim_chunk_bounds(text, 0, len(text))
+        if start < end:
+            blocks.append(TextBlock(content=text[start:end], char_start=start, char_end=end))
+    return blocks
+
+
+def _chunk_with_overlap(text: str, start: int, end: int, overlap_chars: int) -> PreparedChunk | None:
+    content_start = max(0, start - overlap_chars) if start > 0 else start
+    content_start, content_end = _trim_chunk_bounds(text, content_start, end)
+    if content_start >= content_end:
+        return None
+    return PreparedChunk(content=text[content_start:content_end], char_start=content_start, char_end=content_end)
+
+
+def split_text_into_semantic_chunks(text: str, max_chunk_chars: int, overlap_chars: int, max_chunks: int) -> tuple[list[PreparedChunk], bool]:
+    blocks = _text_blocks(text)
+    if not blocks:
+        return [], False
+
+    chunks: list[PreparedChunk] = []
+    truncated = False
+    active_start: int | None = None
+    active_end: int | None = None
+
+    def flush_active() -> None:
+        nonlocal active_start, active_end, truncated
+        if active_start is None or active_end is None:
+            return
+        chunk = _chunk_with_overlap(text, active_start, active_end, overlap_chars)
+        if chunk is not None:
+            chunks.append(chunk)
+        active_start = None
+        active_end = None
+
+    for block in blocks:
+        if len(chunks) >= max_chunks:
+            truncated = True
+            break
+
+        if len(block.content) > max_chunk_chars:
+            flush_active()
+            sub_chunks, sub_truncated = split_text_into_chunks(block.content, max_chunk_chars, overlap_chars, max_chunks - len(chunks))
+            for sub_chunk in sub_chunks:
+                chunks.append(
+                    PreparedChunk(
+                        content=sub_chunk.content,
+                        char_start=block.char_start + sub_chunk.char_start,
+                        char_end=block.char_start + sub_chunk.char_end,
+                    )
+                )
+            if sub_truncated or block.char_end < len(text) and len(chunks) >= max_chunks:
+                truncated = True
+                break
+            continue
+
+        if block.is_heading:
+            flush_active()
+
+        if active_start is None or active_end is None:
+            active_start = block.char_start
+            active_end = block.char_end
+            continue
+
+        candidate_length = block.char_end - active_start
+        if candidate_length > max_chunk_chars:
+            flush_active()
+            if len(chunks) >= max_chunks:
+                truncated = True
+                break
+            active_start = block.char_start
+            active_end = block.char_end
+        else:
+            active_end = block.char_end
+
+    if not truncated:
+        flush_active()
+        if len(chunks) > max_chunks:
+            chunks = chunks[:max_chunks]
+            truncated = True
 
     return chunks, truncated
 
@@ -280,6 +392,12 @@ def chunk_document(db: Session, document_id: str) -> DocumentChunkResult:
         existing is not None
         and existing.status == "chunked"
         and existing.parse_content_sha256 == parse_result.content_sha256
+        and existing.cleaner_name == CLEANER_NAME
+        and existing.cleaner_version == CLEANER_VERSION
+        and existing.chunker_name == CHUNKER_NAME
+        and existing.chunker_version == CHUNKER_VERSION
+        and existing.max_chunk_chars == settings.max_chunk_chars
+        and existing.overlap_chars == settings.chunk_overlap_chars
     ):
         return existing
 
@@ -298,7 +416,7 @@ def chunk_document(db: Session, document_id: str) -> DocumentChunkResult:
             raise _bad_request("Parsed content checksum does not match the parse result.")
 
         cleaned_text = clean_text(parsed_text)
-        prepared_chunks, truncated = split_text_into_chunks(
+        prepared_chunks, truncated = split_text_into_semantic_chunks(
             cleaned_text,
             max_chunk_chars=max_chunk_chars,
             overlap_chars=overlap_chars,

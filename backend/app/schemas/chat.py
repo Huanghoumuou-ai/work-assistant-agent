@@ -18,6 +18,19 @@ class ChatRequest(BaseModel):
     auto_summary: bool = False
 
 
+class ConversationUpdateRequest(BaseModel):
+    title: str
+
+
+class ConversationRegenerateRequest(BaseModel):
+    top_k: int | None = None
+    project_id: str | None = None
+    document_id: str | None = None
+    include_memory: bool = False
+    memory_limit: int | None = None
+    auto_summary: bool = False
+
+
 class ConversationOut(BaseModel):
     id: str
     title: str

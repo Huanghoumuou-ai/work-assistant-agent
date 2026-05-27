@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, FileText, MessageSquarePlus, RefreshCw, Send, SlidersHorizontal } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Clipboard, FileText, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Send, SlidersHorizontal, Square, Trash2 } from "lucide-react";
 
-import { generateConversationSummary, getConversationMessages, getConversationSummary, getConversations, streamChat } from "../api/chat.api";
+import { deleteConversation, generateConversationSummary, getConversationMessages, getConversationSummary, getConversations, regenerateConversation, streamChat, updateConversationTitle } from "../api/chat.api";
 import { getChunkContent } from "../api/documents.api";
 import { getMemory } from "../api/memory.api";
 import { getProjects } from "../api/projects.api";
@@ -22,6 +22,7 @@ function sourceSummary(text: string) {
 
 export function ChatPage() {
   const threadRef = useRef<HTMLDivElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -42,6 +43,7 @@ export function ChatPage() {
   const [streamingAnswer, setStreamingAnswer] = useState("");
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
   const [sourceDetails, setSourceDetails] = useState<Record<string, { loading: boolean; content?: string; error?: string }>>({});
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const projectNameById = useMemo(() => {
     return new Map(projects.map((project) => [project.id, project.name]));
@@ -120,6 +122,8 @@ export function ChatPage() {
     }
 
     setBusy("send");
+    const controller = new AbortController();
+    abortRef.current = controller;
     setPendingPrompt(cleanQuery);
     setStreamingAnswer("");
     setMessage(null);
@@ -153,13 +157,116 @@ export function ChatPage() {
               throw new Error(event.data.message ?? "Chat request failed");
             }
           },
+          signal: controller.signal,
         },
       );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Chat request failed");
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setMessage("Generation stopped. Partial answer was not saved.");
+      } else {
+        setMessage(error instanceof Error ? error.message : "Chat request failed");
+      }
     } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
       setPendingPrompt(null);
       setStreamingAnswer("");
+      setBusy(null);
+    }
+  };
+
+  const stopGenerating = () => {
+    abortRef.current?.abort();
+  };
+
+  const copyText = async (key: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      window.setTimeout(() => setCopiedKey((current) => (current === key ? null : current)), 1400);
+    } catch {
+      setMessage("Copy failed");
+    }
+  };
+
+  const renameActiveConversation = async () => {
+    if (!activeConversation || busy !== null) {
+      return;
+    }
+    const title = window.prompt("Rename conversation", activeConversation.title);
+    if (title === null) {
+      return;
+    }
+    setBusy("conversations");
+    setMessage(null);
+    try {
+      const response = await updateConversationTitle(activeConversation.id, title);
+      setActiveConversation(response.data);
+      upsertConversation(response.data);
+      setMessage("Conversation renamed");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Rename failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const deleteActiveConversation = async () => {
+    if (!activeConversation || busy !== null) {
+      return;
+    }
+    const confirmed = window.confirm(`Delete conversation "${activeConversation.title}"? This removes its messages and summary.`);
+    if (!confirmed) {
+      return;
+    }
+    const conversationId = activeConversation.id;
+    setBusy("conversations");
+    setMessage(null);
+    try {
+      await deleteConversation(conversationId);
+      setConversations((current) => current.filter((item) => item.id !== conversationId));
+      setActiveConversation(null);
+      setSummary(null);
+      setMessages([]);
+      setMessage("Conversation deleted");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Delete failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const regenerateLatest = async () => {
+    if (!activeConversation || busy !== null) {
+      return;
+    }
+    setBusy("send");
+    setMessage(null);
+    setStreamingAnswer("");
+    try {
+      const response = await regenerateConversation(activeConversation.id, {
+        top_k: topK,
+        project_id: projectId || null,
+        document_id: documentId.trim() || null,
+        include_memory: includeMemory,
+        memory_limit: memoryLimit,
+        auto_summary: autoSummary,
+      });
+      setActiveConversation(response.data.conversation);
+      upsertConversation(response.data.conversation);
+      setMessages((current) => {
+        const trimmed = [...current];
+        while (trimmed.length > 0 && trimmed[trimmed.length - 1].role === "assistant") {
+          trimmed.pop();
+        }
+        return [...trimmed, response.data.assistant_message];
+      });
+      setSummary(response.data.summary ?? null);
+      setMessage("Response regenerated");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Regenerate failed");
+    } finally {
       setBusy(null);
     }
   };
@@ -284,6 +391,12 @@ export function ChatPage() {
               <FileText size={16} />
               <span>Summary</span>
             </button>
+            <button className="icon-button" type="button" onClick={() => void renameActiveConversation()} disabled={!activeConversation || busy !== null} title="Rename conversation">
+              <Pencil size={16} />
+            </button>
+            <button className="icon-button danger" type="button" onClick={() => void deleteActiveConversation()} disabled={!activeConversation || busy !== null} title="Delete conversation">
+              <Trash2 size={16} />
+            </button>
             <button className={showControls ? "secondary-button active" : "secondary-button"} type="button" onClick={() => setShowControls((value) => !value)}>
               <SlidersHorizontal size={16} />
               <span>Options</span>
@@ -398,6 +511,18 @@ export function ChatPage() {
                         {item.provider} / {item.model}
                       </span>
                     ) : null}
+                    {item.role === "assistant" ? (
+                      <div className="message-actions">
+                        <button className="icon-button small" type="button" title="Copy answer" onClick={() => void copyText(`answer:${item.id}`, item.content)}>
+                          {copiedKey === `answer:${item.id}` ? <Check size={15} /> : <Clipboard size={15} />}
+                        </button>
+                        {item.id === messages[messages.length - 1]?.id ? (
+                          <button className="icon-button small" type="button" title="Regenerate response" onClick={() => void regenerateLatest()} disabled={busy !== null || !activeConversation}>
+                            <RotateCcw size={15} />
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {item.sources.length > 0 ? (
                       <div className="citation-list">
                         {item.sources.map((source) => {
@@ -444,6 +569,19 @@ export function ChatPage() {
                                       ? "Loading full chunk..."
                                       : sourceDetails[sourceKey]?.error ?? sourceDetails[sourceKey]?.content ?? source.excerpt}
                                   </p>
+                                  <button
+                                    className="secondary-button compact-button"
+                                    type="button"
+                                    onClick={() =>
+                                      void copyText(
+                                        `source:${sourceKey}`,
+                                        `${source.source_id} ${source.source_filename} document=${source.document_id} chunk=${source.chunk_id} score=${source.score.toFixed(4)} excerpt=${source.excerpt}`,
+                                      )
+                                    }
+                                  >
+                                    {copiedKey === `source:${sourceKey}` ? <Check size={14} /> : <Clipboard size={14} />}
+                                    <span>Copy citation</span>
+                                  </button>
                                 </div>
                               ) : null}
                             </div>
@@ -491,6 +629,19 @@ export function ChatPage() {
                                       ? "Loading full memory..."
                                       : sourceDetails[sourceKey]?.error ?? sourceDetails[sourceKey]?.content ?? source.content}
                                   </p>
+                                  <button
+                                    className="secondary-button compact-button"
+                                    type="button"
+                                    onClick={() =>
+                                      void copyText(
+                                        `memory:${sourceKey}`,
+                                        `${source.source_id} ${source.title} memory=${source.memory_id} type=${source.type} score=${source.score.toFixed(2)} content=${source.content}`,
+                                      )
+                                    }
+                                  >
+                                    {copiedKey === `memory:${sourceKey}` ? <Check size={14} /> : <Clipboard size={14} />}
+                                    <span>Copy citation</span>
+                                  </button>
                                 </div>
                               ) : null}
                             </div>
@@ -558,9 +709,15 @@ export function ChatPage() {
           />
           <div className="composer-footer">
             <span className="composer-mode-label">RAG answer</span>
-            <button className="send-button" type="submit" disabled={busy === "send" || !query.trim()}>
-              {busy === "send" ? <RefreshCw size={18} /> : <Send size={18} />}
-            </button>
+            {busy === "send" ? (
+              <button className="send-button stop" type="button" onClick={stopGenerating} title="Stop generating">
+                <Square size={16} />
+              </button>
+            ) : (
+              <button className="send-button" type="submit" disabled={!query.trim()}>
+                <Send size={18} />
+              </button>
+            )}
           </div>
         </form>
       </main>
