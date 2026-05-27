@@ -8,6 +8,7 @@ from backend.app.db.models.document_pipeline_job_event import DocumentPipelineJo
 from backend.app.db.models.document import Document
 from backend.app.db.models.document_parse_result import DocumentParseResult
 from backend.app.db.models.memory import Memory
+from backend.app.db.models.memory_suggestion import MemorySuggestion
 from backend.app.db.models.message import Message
 from backend.app.db.models.project import Project
 from backend.app.db.models.provider_diagnostic_run import ProviderDiagnosticRun
@@ -23,6 +24,7 @@ __all__ = [
     "DocumentPipelineJobEvent",
     "DocumentParseResult",
     "Memory",
+    "MemorySuggestion",
     "Message",
     "Project",
     "ProviderDiagnosticRun",

@@ -523,6 +523,43 @@ export interface MemorySearchResult {
   items: MemorySearchItem[];
 }
 
+export type MemorySuggestionStatus = "pending" | "accepted" | "rejected";
+
+export interface MemorySuggestion {
+  id: string;
+  conversation_id: string | null;
+  project_id: string | null;
+  project_name: string | null;
+  type: MemoryType;
+  title: string;
+  content: string;
+  rationale: string | null;
+  status: MemorySuggestionStatus;
+  source_type: string;
+  source_ref: string | null;
+  memory_id: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  updated_at: string;
+}
+
+export interface MemorySuggestionList {
+  items: MemorySuggestion[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface MemorySuggestionBatch {
+  items: MemorySuggestion[];
+  total: number;
+}
+
+export interface MemorySuggestionAcceptResult {
+  suggestion: MemorySuggestion;
+  memory: MemoryItem;
+}
+
 export interface MemorySource {
   source_id: string;
   rank: number;

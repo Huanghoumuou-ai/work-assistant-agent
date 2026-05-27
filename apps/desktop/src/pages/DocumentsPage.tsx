@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Archive, Clock3, Database, FilePlus2, FileText, FileUp, ListChecks, PlayCircle, RefreshCw, RotateCcw, Scissors, SlidersHorizontal, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, Archive, Clock3, Database, FilePlus2, FileText, FileUp, Lightbulb, ListChecks, PlayCircle, RefreshCw, RotateCcw, Scissors, SlidersHorizontal, Trash2, XCircle } from "lucide-react";
 
 import {
   batchCancelPipelineJobs,
@@ -24,6 +24,7 @@ import {
   updateDocumentStatus,
   uploadDocument,
 } from "../api/documents.api";
+import { generateMemorySuggestionsFromDocument } from "../api/memory.api";
 import { getProjects } from "../api/projects.api";
 import type { DocumentItem, DocumentStatus, PipelineJob, PipelineJobEvent, PipelineJobStatus, PipelineStatus, ProjectItem, ProvidersStatus } from "../types/api";
 import { formatDate } from "../utils/formatDate";
@@ -47,6 +48,7 @@ type BusyAction =
   | `parse:${string}`
   | `chunk:${string}`
   | `index:${string}`
+  | `suggest:${string}`
   | `status:${string}`
   | `delete:${string}`
   | null;
@@ -483,6 +485,24 @@ export function DocumentsPage() {
     }
   };
 
+  const suggestFromDocument = async (document: DocumentItem) => {
+    if (document.status !== "uploaded" || document.parse_result?.status !== "parsed") {
+      setMessage("Only uploaded and parsed documents can generate suggestions");
+      return;
+    }
+
+    setBusyAction(`suggest:${document.id}`);
+    setMessage(null);
+    try {
+      const response = await generateMemorySuggestionsFromDocument(document.id, 5, true);
+      setMessage(`Generated ${response.data.total} pending work suggestion${response.data.total === 1 ? "" : "s"} for Memory review`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Suggestion generation failed");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const removeDocument = async (document: DocumentItem) => {
     const confirmed = window.confirm(
       `Permanently delete "${document.original_filename}"? This will delete the database record and the original file.`,
@@ -895,11 +915,13 @@ export function DocumentsPage() {
                 const pipelineJob = pipelineJobs[document.id];
                 const canChunk = document.status === "uploaded" && parseResult?.status === "parsed";
                 const canIndex = canChunk && chunkResult?.status === "chunked";
+                const canSuggest = document.status === "uploaded" && parseResult?.status === "parsed";
                 const pipelineBusy = busyAction === `pipeline:${document.id}`;
                 const pipelineActive = pipelineJob?.status === "queued" || pipelineJob?.status === "running";
                 const pipelineCancelBusy = pipelineJob ? busyAction === `cancel:${pipelineJob.id}` : false;
                 const pipelineRetryBusy = pipelineJob ? busyAction === `retry:${pipelineJob.id}` : false;
                 const pipelineReprocessBusy = busyAction === `reprocess:${document.id}`;
+                const suggestBusy = busyAction === `suggest:${document.id}`;
                 return (
                   <tr key={document.id}>
                     <td>
@@ -1044,6 +1066,15 @@ export function DocumentsPage() {
                         <button
                           className="icon-button small"
                           type="button"
+                          title={canSuggest ? "Generate pending Memory suggestions from this document" : "Parse the uploaded document before suggesting memories"}
+                          onClick={() => void suggestFromDocument(document)}
+                          disabled={busyAction !== null || !canSuggest}
+                        >
+                          <Lightbulb size={16} />
+                        </button>
+                        <button
+                          className="icon-button small"
+                          type="button"
                           title={document.status === "archived" ? "Restore document" : "Archive document"}
                           onClick={() => void changeStatus(document)}
                           disabled={busyAction !== null}
@@ -1060,7 +1091,7 @@ export function DocumentsPage() {
                           <Trash2 size={16} />
                         </button>
                       </div>
-                      {pipelineBusy || pipelineCancelBusy || pipelineRetryBusy || pipelineReprocessBusy || parseBusy || chunkBusy || indexBusy || statusBusy || deleteBusy ? (
+                      {pipelineBusy || pipelineCancelBusy || pipelineRetryBusy || pipelineReprocessBusy || parseBusy || chunkBusy || indexBusy || suggestBusy || statusBusy || deleteBusy ? (
                         <span>
                           {pipelineBusy
                             ? "Queueing"
@@ -1076,9 +1107,11 @@ export function DocumentsPage() {
                                       ? "Chunking"
                                       : indexBusy
                                         ? "Indexing"
-                                        : statusBusy
-                                          ? "Updating"
-                                          : "Deleting"}
+                                        : suggestBusy
+                                          ? "Suggesting"
+                                          : statusBusy
+                                            ? "Updating"
+                                            : "Deleting"}
                         </span>
                       ) : null}
                     </td>

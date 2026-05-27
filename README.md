@@ -1,5 +1,30 @@
 # WorkMemory Agent
 
+## 2026-05-27 Update: reviewed work suggestions
+
+WorkMemory now supports an audited suggestion flow that matches the local-first knowledge-base boundary:
+
+- Chat conversations can generate pending Memory suggestions.
+- Parsed uploaded files and pasted-text documents can generate pending Memory suggestions.
+- Suggestions use the configured chat provider only when the user clicks the action.
+- Suggestions are stored in SQLite as `pending` records and do not enter active Memory automatically.
+- The Memory page lets the user accept a suggestion into active Memory or reject it.
+- Accepted suggestions create normal active Memory records with `source_type=suggestion` and a `source_ref` pointing to the reviewed suggestion.
+- Parsed document text used for document suggestions is path-checked and checksum-checked before provider use.
+- No API keys are stored or displayed by this feature.
+
+New APIs:
+
+- `POST /api/memory/suggestions/from-conversation`
+- `POST /api/memory/suggestions/from-document`
+- `GET /api/memory/suggestions`
+- `POST /api/memory/suggestions/{suggestion_id}/accept`
+- `POST /api/memory/suggestions/{suggestion_id}/reject`
+
+Database migration:
+
+- `20260527_0004_memory_suggestions.py` adds `memory_suggestions`.
+
 WorkMemory Agent 是一个本地优先的桌面级工作知识库应用。当前项目已经从工程骨架推进到可运行 MVP：用户可以上传工作资料或粘贴文本，系统会自动解析、切块、索引到 Chroma，然后在 Chat 页面用 RAG 方式提问，并保存本地对话历史。
 
 当前定位仍然是“本地优先 RAG 工作知识库”，不是 autonomous agent。项目刻意保持边界：不做自动执行任务，不做多用户权限，不自动抽取长期记忆，不做 GraphRAG。

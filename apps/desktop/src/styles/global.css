@@ -847,6 +847,10 @@ textarea:disabled {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.suggestion-grid {
+  padding: 16px;
+}
+
 .source-card {
   display: grid;
   gap: 12px;

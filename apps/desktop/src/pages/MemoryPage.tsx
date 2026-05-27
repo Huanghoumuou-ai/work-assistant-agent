@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, RefreshCw, RotateCcw, Save, Search, X } from "lucide-react";
+import { Archive, CheckCircle2, RefreshCw, RotateCcw, Save, Search, X, XCircle } from "lucide-react";
 
-import { createMemory, getMemories, searchMemories, updateMemory, updateMemoryStatus } from "../api/memory.api";
+import { acceptMemorySuggestion, createMemory, getMemories, getMemorySuggestions, rejectMemorySuggestion, searchMemories, updateMemory, updateMemoryStatus } from "../api/memory.api";
 import { getProjects } from "../api/projects.api";
-import type { MemoryItem, MemorySearchItem, MemoryStatus, MemoryStatusFilter, MemoryType, ProjectItem } from "../types/api";
+import type { MemoryItem, MemorySearchItem, MemoryStatus, MemoryStatusFilter, MemorySuggestion, MemoryType, ProjectItem } from "../types/api";
 import { formatDate } from "../utils/formatDate";
 
 const PAGE_SIZE = 10;
 const MEMORY_TYPES: MemoryType[] = ["note", "requirement", "decision", "rule"];
 
-type BusyAction = "load" | "save" | "search" | `status:${string}` | null;
+type BusyAction = "load" | "save" | "search" | `status:${string}` | `suggestion:${string}` | null;
 
 interface MemoryFormState {
   projectId: string;
@@ -50,10 +50,22 @@ function toIsoOrNull(value: string) {
   return date.toISOString();
 }
 
+function suggestionSourceLabel(suggestion: MemorySuggestion) {
+  if (suggestion.source_type === "chat_suggestion") {
+    return suggestion.conversation_id ? `Chat ${suggestion.conversation_id}` : "Chat";
+  }
+  if (suggestion.source_type === "document_suggestion") {
+    return suggestion.source_ref ? `Document ${suggestion.source_ref}` : "Document";
+  }
+  return suggestion.source_ref ? `${suggestion.source_type} ${suggestion.source_ref}` : suggestion.source_type;
+}
+
 export function MemoryPage() {
   const formRef = useRef<HTMLDivElement | null>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [memories, setMemories] = useState<MemoryItem[]>([]);
+  const [suggestions, setSuggestions] = useState<MemorySuggestion[]>([]);
+  const [suggestionTotal, setSuggestionTotal] = useState(0);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [projectFilter, setProjectFilter] = useState("");
@@ -90,10 +102,16 @@ export function MemoryPage() {
     setTotal(response.data.total);
   };
 
+  const loadSuggestions = async () => {
+    const response = await getMemorySuggestions({ limit: 20, offset: 0, status: "pending" });
+    setSuggestions(response.data.items);
+    setSuggestionTotal(response.data.total);
+  };
+
   const refresh = async (nextOffset = offset) => {
     setBusy("load");
     try {
-      await Promise.all([loadProjects(), loadMemories(nextOffset)]);
+      await Promise.all([loadProjects(), loadMemories(nextOffset), loadSuggestions()]);
       setMessage(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to load memories");
@@ -198,6 +216,40 @@ export function MemoryPage() {
     }
   };
 
+  const acceptSuggestion = async (suggestion: MemorySuggestion) => {
+    if (busy !== null) {
+      return;
+    }
+    setBusy(`suggestion:${suggestion.id}`);
+    setMessage(null);
+    try {
+      await acceptMemorySuggestion(suggestion.id);
+      await Promise.all([loadSuggestions(), loadMemories(offset)]);
+      setMessage("Suggestion accepted into active Memory");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Accept suggestion failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const rejectSuggestion = async (suggestion: MemorySuggestion) => {
+    if (busy !== null) {
+      return;
+    }
+    setBusy(`suggestion:${suggestion.id}`);
+    setMessage(null);
+    try {
+      await rejectMemorySuggestion(suggestion.id);
+      await loadSuggestions();
+      setMessage("Suggestion rejected");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Reject suggestion failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   useEffect(() => {
     void refresh(offset);
   }, [offset, projectFilter, typeFilter, statusFilter]);
@@ -213,6 +265,49 @@ export function MemoryPage() {
           <RefreshCw size={18} />
         </button>
       </header>
+
+      <section className="table-panel">
+        <div className="table-heading">
+          <strong>Pending Suggestions</strong>
+          <span>{busy === "load" ? "Loading" : `${suggestionTotal} pending`}</span>
+        </div>
+        {suggestions.length === 0 ? (
+          <div className="empty-panel compact">No pending suggestions</div>
+        ) : (
+          <div className="source-grid compact suggestion-grid">
+            {suggestions.map((suggestion) => {
+              const suggestionBusy = busy === `suggestion:${suggestion.id}`;
+              return (
+                <article className="source-card" key={suggestion.id}>
+                  <div className="source-card-header">
+                    <strong>{suggestion.type}</strong>
+                    <span>{formatDate(suggestion.created_at)}</span>
+                  </div>
+                  <h2>{suggestion.title}</h2>
+                  <dl>
+                    <dt>Project</dt>
+                    <dd>{suggestion.project_name ?? "Unfiled"}</dd>
+                    <dt>Source</dt>
+                    <dd>{suggestionSourceLabel(suggestion)}</dd>
+                  </dl>
+                  <p>{suggestion.content}</p>
+                  {suggestion.rationale ? <p>{suggestion.rationale}</p> : null}
+                  <div className="action-group">
+                    <button className="secondary-button" type="button" onClick={() => void acceptSuggestion(suggestion)} disabled={busy !== null}>
+                      <CheckCircle2 size={16} />
+                      <span>{suggestionBusy ? "Reviewing" : "Accept"}</span>
+                    </button>
+                    <button className="secondary-button danger" type="button" onClick={() => void rejectSuggestion(suggestion)} disabled={busy !== null}>
+                      <XCircle size={16} />
+                      <span>Reject</span>
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       <div className="memory-form" ref={formRef}>
         <label>

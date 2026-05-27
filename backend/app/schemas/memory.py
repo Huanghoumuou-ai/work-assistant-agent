@@ -73,3 +73,53 @@ class MemorySearchItemOut(BaseModel):
 class MemorySearchOut(BaseModel):
     query: str
     items: list[MemorySearchItemOut]
+
+
+class MemorySuggestionCreateFromConversation(BaseModel):
+    conversation_id: str
+    limit: int | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class MemorySuggestionCreateFromDocument(BaseModel):
+    document_id: str
+    limit: int | None = None
+    include_memory: bool = True
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class MemorySuggestionOut(BaseModel):
+    id: str
+    conversation_id: str | None
+    project_id: str | None
+    project_name: str | None
+    type: str
+    title: str
+    content: str
+    rationale: str | None
+    status: str
+    source_type: str
+    source_ref: str | None
+    memory_id: str | None
+    created_at: datetime
+    reviewed_at: datetime | None
+    updated_at: datetime
+
+
+class MemorySuggestionListOut(BaseModel):
+    items: list[MemorySuggestionOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class MemorySuggestionBatchOut(BaseModel):
+    items: list[MemorySuggestionOut]
+    total: int
+
+
+class MemorySuggestionAcceptOut(BaseModel):
+    suggestion: MemorySuggestionOut
+    memory: MemoryOut

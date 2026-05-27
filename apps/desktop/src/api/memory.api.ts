@@ -1,5 +1,18 @@
 import { getJson, patchJson, postJson } from "./client";
-import type { ApiResponse, MemoryItem, MemoryList, MemorySearchResult, MemoryStatus, MemoryStatusFilter, MemoryType } from "../types/api";
+import type {
+  ApiResponse,
+  MemoryItem,
+  MemoryList,
+  MemorySearchResult,
+  MemoryStatus,
+  MemoryStatusFilter,
+  MemorySuggestion,
+  MemorySuggestionAcceptResult,
+  MemorySuggestionBatch,
+  MemorySuggestionList,
+  MemorySuggestionStatus,
+  MemoryType,
+} from "../types/api";
 
 export interface MemoryQuery {
   limit: number;
@@ -60,4 +73,29 @@ export function searchMemories(payload: MemorySearchPayload) {
 
 export function getMemory(memoryId: string) {
   return getJson<ApiResponse<MemoryItem>>(`/api/memory/${memoryId}`);
+}
+
+export function getMemorySuggestions(query: { limit: number; offset: number; status?: MemorySuggestionStatus | "all" }) {
+  const params = new URLSearchParams({
+    limit: String(query.limit),
+    offset: String(query.offset),
+    status: query.status ?? "pending",
+  });
+  return getJson<ApiResponse<MemorySuggestionList>>(`/api/memory/suggestions?${params.toString()}`);
+}
+
+export function generateMemorySuggestionsFromConversation(conversationId: string, limit = 5) {
+  return postJson<ApiResponse<MemorySuggestionBatch>>("/api/memory/suggestions/from-conversation", { conversation_id: conversationId, limit });
+}
+
+export function generateMemorySuggestionsFromDocument(documentId: string, limit = 5, includeMemory = true) {
+  return postJson<ApiResponse<MemorySuggestionBatch>>("/api/memory/suggestions/from-document", { document_id: documentId, limit, include_memory: includeMemory });
+}
+
+export function acceptMemorySuggestion(suggestionId: string) {
+  return postJson<ApiResponse<MemorySuggestionAcceptResult>>(`/api/memory/suggestions/${suggestionId}/accept`, {});
+}
+
+export function rejectMemorySuggestion(suggestionId: string) {
+  return postJson<ApiResponse<MemorySuggestion>>(`/api/memory/suggestions/${suggestionId}/reject`, {});
 }

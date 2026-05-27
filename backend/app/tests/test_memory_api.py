@@ -5,7 +5,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from backend.app.core.config import settings
-from backend.app.db.models import Memory
+from backend.app.db.models import Memory, MemorySuggestion
 from backend.app.db.session import SessionLocal
 from backend.app.main import app
 
@@ -30,6 +30,11 @@ def _create_memory(payload: dict) -> dict:
 def _memory_count() -> int:
     with SessionLocal() as db:
         return db.query(Memory).count()
+
+
+def _suggestion_count() -> int:
+    with SessionLocal() as db:
+        return db.query(MemorySuggestion).count()
 
 
 def _use_fake_stack(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -266,3 +271,77 @@ def test_chat_and_rag_do_not_create_memories(monkeypatch) -> None:  # type: igno
     assert chat.status_code == 200
     assert rag.status_code == 200
     assert _memory_count() == before
+
+
+def test_generate_accept_and_reject_memory_suggestions_from_conversation(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _use_fake_stack(monkeypatch)
+    before_memory = _memory_count()
+    before_suggestion = _suggestion_count()
+    with TestClient(app) as client:
+        chat = client.post("/api/chat", json={"query": "Remember that release notes need review."})
+    assert chat.status_code == 200
+    conversation_id = chat.json()["data"]["conversation"]["id"]
+
+    with TestClient(app) as client:
+        generated = client.post("/api/memory/suggestions/from-conversation", json={"conversation_id": conversation_id, "limit": 2})
+        listing = client.get("/api/memory/suggestions?status=pending")
+
+    assert generated.status_code == 202
+    suggestions = generated.json()["data"]["items"]
+    assert suggestions
+    assert suggestions[0]["status"] == "pending"
+    assert suggestions[0]["source_type"] == "chat_suggestion"
+    assert suggestions[0]["conversation_id"] == conversation_id
+    assert listing.status_code == 200
+    assert _memory_count() == before_memory
+    assert _suggestion_count() == before_suggestion + len(suggestions)
+
+    suggestion_id = suggestions[0]["id"]
+    with TestClient(app) as client:
+        accepted = client.post(f"/api/memory/suggestions/{suggestion_id}/accept")
+
+    assert accepted.status_code == 200
+    assert accepted.json()["data"]["suggestion"]["status"] == "accepted"
+    assert accepted.json()["data"]["memory"]["source_type"] == "suggestion"
+    assert _memory_count() == before_memory + 1
+
+    with TestClient(app) as client:
+        second = client.post("/api/memory/suggestions/from-conversation", json={"conversation_id": conversation_id, "limit": 1}).json()["data"]["items"][0]
+        rejected = client.post(f"/api/memory/suggestions/{second['id']}/reject")
+
+    assert rejected.status_code == 200
+    assert rejected.json()["data"]["status"] == "rejected"
+
+
+def test_generate_memory_suggestions_from_document_uses_parsed_text_and_existing_memory(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _use_fake_stack(monkeypatch)
+    _create_memory({"type": "rule", "title": "Existing rule", "content": "Keep citations attached to recommendations."})
+    with TestClient(app) as client:
+        upload = client.post("/api/upload", files={"file": ("suggestions.md", b"# Release\nReview launch risks.", "text/markdown")})
+    assert upload.status_code == 200
+    document_id = upload.json()["data"]["id"]
+    with TestClient(app) as client:
+        assert client.post(f"/api/documents/{document_id}/parse").status_code == 200
+        generated = client.post("/api/memory/suggestions/from-document", json={"document_id": document_id, "limit": 3, "include_memory": True})
+
+    assert generated.status_code == 202
+    suggestions = generated.json()["data"]["items"]
+    assert suggestions
+    assert suggestions[0]["source_type"] == "document_suggestion"
+    assert suggestions[0]["source_ref"] == document_id
+    assert suggestions[0]["status"] == "pending"
+
+
+def test_memory_suggestion_generation_requires_parsed_uploaded_document(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _use_fake_stack(monkeypatch)
+    with TestClient(app) as client:
+        upload = client.post("/api/upload", files={"file": ("unparsed.md", b"unparsed", "text/markdown")})
+    document_id = upload.json()["data"]["id"]
+
+    with TestClient(app) as client:
+        unparsed = client.post("/api/memory/suggestions/from-document", json={"document_id": document_id})
+        client.patch(f"/api/documents/{document_id}/status", json={"status": "archived"})
+        archived = client.post("/api/memory/suggestions/from-document", json={"document_id": document_id})
+
+    assert unparsed.status_code == 400
+    assert archived.status_code == 400

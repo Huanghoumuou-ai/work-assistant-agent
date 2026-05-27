@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Clipboard, FileText, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Send, SlidersHorizontal, Square, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Clipboard, FileText, Lightbulb, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Send, SlidersHorizontal, Square, Trash2 } from "lucide-react";
 
 import { deleteConversation, generateConversationSummary, getConversationMessages, getConversationSummary, getConversations, regenerateConversation, streamChat, updateConversationTitle } from "../api/chat.api";
 import { getChunkContent } from "../api/documents.api";
-import { getMemory } from "../api/memory.api";
+import { generateMemorySuggestionsFromConversation, getMemory } from "../api/memory.api";
 import { getProjects } from "../api/projects.api";
 import type { ChatMessage, ConversationItem, ConversationSummary, ProjectItem } from "../types/api";
 import { formatDate } from "../utils/formatDate";
 
 const DEFAULT_TOP_K = 5;
 
-type BusyState = "boot" | "conversations" | "messages" | "send" | "summary" | null;
+type BusyState = "boot" | "conversations" | "messages" | "send" | "summary" | "suggestions" | null;
 
 function sourceSummary(text: string) {
   const compact = text.replace(/\s+/g, " ").trim();
@@ -271,6 +271,22 @@ export function ChatPage() {
     }
   };
 
+  const suggestMemories = async () => {
+    if (!activeConversation || busy !== null) {
+      return;
+    }
+    setBusy("suggestions");
+    setMessage(null);
+    try {
+      const response = await generateMemorySuggestionsFromConversation(activeConversation.id, 5);
+      setMessage(`Generated ${response.data.total} pending work suggestion${response.data.total === 1 ? "" : "s"} for Memory review`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Suggestion generation failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const refreshSummary = async () => {
     if (!activeConversation || busy !== null) {
       return;
@@ -390,6 +406,10 @@ export function ChatPage() {
             <button className={showSummary ? "secondary-button active" : "secondary-button"} type="button" onClick={() => setShowSummary((value) => !value)} disabled={!activeConversation}>
               <FileText size={16} />
               <span>Summary</span>
+            </button>
+            <button className="secondary-button" type="button" onClick={() => void suggestMemories()} disabled={!activeConversation || busy !== null}>
+              <Lightbulb size={16} />
+              <span>{busy === "suggestions" ? "Suggesting" : "Suggest"}</span>
             </button>
             <button className="icon-button" type="button" onClick={() => void renameActiveConversation()} disabled={!activeConversation || busy !== null} title="Rename conversation">
               <Pencil size={16} />
