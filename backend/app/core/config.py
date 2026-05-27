@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     rag_top_k: int = 5
     rag_max_context_chars: int = 12_000
     rag_source_excerpt_chars: int = 500
+    rag_query_rewrite_enabled: bool = False
+    rag_query_rewrite_max_chars: int = 500
     memory_context_max_chars_per_item: int = 1_200
     memory_context_max_total_chars: int = 5_000
     chat_context_recent_messages: int = 8

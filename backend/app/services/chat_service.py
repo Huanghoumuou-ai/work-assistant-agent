@@ -265,6 +265,8 @@ def stream_chat_events(
             memory_sources=context.memory_sources,
             model=context.provider_info.model,
             provider=context.provider_info.provider,
+            query_used=context.retrieval_query,
+            query_rewritten=context.query_rewritten,
             usage=None,
         )
         saved = save_chat_turn(

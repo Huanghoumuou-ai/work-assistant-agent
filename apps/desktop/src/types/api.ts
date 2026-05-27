@@ -75,6 +75,8 @@ export interface SettingsStatus {
     rag_top_k: number;
     rag_max_context_chars: number;
     rag_source_excerpt_chars: number;
+    rag_query_rewrite_enabled: boolean;
+    rag_query_rewrite_max_chars: number;
     memory_context_max_chars_per_item: number;
     memory_context_max_total_chars: number;
     chat_context_recent_messages: number;
@@ -420,6 +422,8 @@ export interface RagSearchResult {
   memory_sources: MemorySource[];
   model: string;
   provider: string;
+  query_used: string | null;
+  query_rewritten: boolean;
   usage: Record<string, unknown> | null;
 }
 

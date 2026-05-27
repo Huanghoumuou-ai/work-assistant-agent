@@ -280,9 +280,11 @@ Retrieval API 不返回 chunk content、parsed text 或 embedding vector。
 行为：
 
 - 基于 Retrieval 结果读取服务端内部 chunk content。
+- 可选 query rewrite：当 `RAG_QUERY_REWRITE_ENABLED=true` 时，会先用 LLM 将问题改写为检索 query；provider 未配置或改写失败时自动回退原始 query。
 - 构建 RAG prompt。
 - 调用 OpenAI-compatible Chat API 或 fake LLM。
 - 返回 answer 和 sources。
+- 返回 `query_used` 和 `query_rewritten` 供诊断。
 - sources 只返回 excerpt，不返回完整 chunk content。
 - 无检索来源时直接返回“知识库中没有找到足够依据。”，不调用 LLM。
 - Prompt 要求模型只能基于 sources、memory context、conversation context 回答。
@@ -523,7 +525,7 @@ CHROMA_COLLECTION_NAME=新的_collection_name
 - 表格结构保留。
 - PDF 页面号和段落位置信息。
 - reranker。
-- query rewrite。
+- query rewrite 已有可选开关和失败回退；后续可继续优化 prompt 与评估。
 - 项目/文档/时间意图识别。
 
 ### 6. Chat 流式输出还没有取消和恢复
@@ -1207,7 +1209,7 @@ npm run build -w apps/desktop
 2. 表格结构化解析。
 3. PDF 页码和页内定位。
 4. reranker。
-5. query rewrite。
+5. query rewrite 质量评估和更细粒度开关。
 6. 项目/文档/时间过滤意图识别。
 
 ### P3：Memory 与长期知识

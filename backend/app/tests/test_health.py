@@ -69,6 +69,8 @@ def test_settings_status_exposes_safe_runtime_limits() -> None:
         "rag_top_k": settings.rag_top_k,
         "rag_max_context_chars": settings.rag_max_context_chars,
         "rag_source_excerpt_chars": settings.rag_source_excerpt_chars,
+        "rag_query_rewrite_enabled": settings.rag_query_rewrite_enabled,
+        "rag_query_rewrite_max_chars": settings.rag_query_rewrite_max_chars,
         "memory_context_max_chars_per_item": settings.memory_context_max_chars_per_item,
         "memory_context_max_total_chars": settings.memory_context_max_total_chars,
         "chat_context_recent_messages": settings.chat_context_recent_messages,

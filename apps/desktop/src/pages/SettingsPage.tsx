@@ -219,6 +219,10 @@ export function SettingsPage() {
               <dd>
                 top {state.settings.data.limits.rag_top_k}, {state.settings.data.limits.rag_max_context_chars} context chars
               </dd>
+              <dt>Query Rewrite</dt>
+              <dd>
+                {state.settings.data.limits.rag_query_rewrite_enabled ? "Enabled" : "Disabled"}, max {state.settings.data.limits.rag_query_rewrite_max_chars} chars
+              </dd>
               <dt>Memory Context</dt>
               <dd>
                 {state.settings.data.limits.memory_context_max_chars_per_item} chars each, {state.settings.data.limits.memory_context_max_total_chars} total

@@ -50,4 +50,6 @@ class RagSearchOut(BaseModel):
     memory_sources: list[MemorySourceOut] = Field(default_factory=list)
     model: str
     provider: str
+    query_used: str | None = None
+    query_rewritten: bool = False
     usage: dict[str, Any] | None = None

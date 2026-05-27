@@ -21,6 +21,8 @@ NO_EVIDENCE_ANSWER = "\u77e5\u8bc6\u5e93\u4e2d\u6ca1\u6709\u627e\u5230\u8db3\u59
 @dataclass(frozen=True)
 class RagGenerationContext:
     query: str
+    retrieval_query: str
+    query_rewritten: bool
     messages: list[dict[str, str]]
     sources: list[RagSourceOut]
     memory_sources: list[MemorySourceOut]
@@ -52,6 +54,8 @@ def _validate_rag_config() -> None:
         raise _bad_request("RAG_MAX_CONTEXT_CHARS must be greater than 0.")
     if settings.rag_source_excerpt_chars < 1:
         raise _bad_request("RAG_SOURCE_EXCERPT_CHARS must be greater than 0.")
+    if settings.rag_query_rewrite_max_chars < 1:
+        raise _bad_request("RAG_QUERY_REWRITE_MAX_CHARS must be greater than 0.")
     if settings.memory_context_max_chars_per_item < 1:
         raise _bad_request("MEMORY_CONTEXT_MAX_CHARS_PER_ITEM must be greater than 0.")
     if settings.memory_context_max_total_chars < 1:
@@ -200,6 +204,46 @@ def build_rag_messages(
     ]
 
 
+def build_query_rewrite_messages(query: str, conversation_context: str | None = None) -> list[dict[str, str]]:
+    context = conversation_context or ""
+    return [
+        {
+            "role": "system",
+            "content": (
+                "Rewrite the user's question into one concise search query for a local RAG retrieval system. "
+                "Preserve proper nouns, product names, filenames, project names, dates, and technical terms. "
+                "Do not answer the question. Return only the rewritten query text."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Conversation context:\n{context}\n\nQuestion:\n{query}",
+        },
+    ]
+
+
+def maybe_rewrite_query(provider: ChatProvider, query: str, conversation_context: str | None = None) -> tuple[str, bool]:
+    if not settings.rag_query_rewrite_enabled:
+        return query, False
+    provider_info = provider.info
+    if provider_info.provider == "openai" and not provider_info.configured:
+        return query, False
+    try:
+        completion = provider.complete(build_query_rewrite_messages(query, conversation_context))
+    except Exception:
+        logger.exception("RAG query rewrite failed; falling back to original query.")
+        return query, False
+
+    rewritten = " ".join(completion.content.split())
+    if not rewritten:
+        return query, False
+    if len(rewritten) > settings.rag_query_rewrite_max_chars:
+        rewritten = rewritten[: settings.rag_query_rewrite_max_chars].rstrip()
+    if not rewritten or rewritten.casefold() == query.casefold():
+        return query, False
+    return rewritten, True
+
+
 def prepare_rag_generation(
     db: Session,
     *,
@@ -218,10 +262,11 @@ def prepare_rag_generation(
 
     provider = get_chat_provider()
     provider_info = provider.info
+    retrieval_query, query_rewritten = maybe_rewrite_query(provider, clean_query, conversation_context)
     hits = search_retrieval_context(
         db,
         RetrievalSearchParams(
-            query=clean_query,
+            query=retrieval_query,
             top_k=top_k,
             project_id=project_id,
             document_id=document_id,
@@ -247,6 +292,8 @@ def prepare_rag_generation(
     if not sources and not memory_sources and not conversation_context:
         return RagGenerationContext(
             query=clean_query,
+            retrieval_query=retrieval_query,
+            query_rewritten=query_rewritten,
             messages=[],
             sources=[],
             memory_sources=[],
@@ -261,6 +308,8 @@ def prepare_rag_generation(
     messages = build_rag_messages(clean_query, hits, memory_blocks, conversation_context)
     return RagGenerationContext(
         query=clean_query,
+        retrieval_query=retrieval_query,
+        query_rewritten=query_rewritten,
         messages=messages,
         sources=sources,
         memory_sources=memory_sources,
@@ -297,6 +346,8 @@ def answer_rag(
             memory_sources=context.memory_sources,
             model=context.provider_info.model,
             provider=context.provider_info.provider,
+            query_used=context.retrieval_query,
+            query_rewritten=context.query_rewritten,
             usage=None,
         )
 
@@ -314,5 +365,7 @@ def answer_rag(
         memory_sources=context.memory_sources,
         model=completion.model,
         provider=completion.provider,
+        query_used=context.retrieval_query,
+        query_rewritten=context.query_rewritten,
         usage=completion.usage,
     )

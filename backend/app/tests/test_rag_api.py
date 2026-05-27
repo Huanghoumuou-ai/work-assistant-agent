@@ -23,6 +23,8 @@ def _use_fake_stack(monkeypatch) -> str:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(settings, "rag_top_k", 5)
     monkeypatch.setattr(settings, "rag_max_context_chars", 12000)
     monkeypatch.setattr(settings, "rag_source_excerpt_chars", 500)
+    monkeypatch.setattr(settings, "rag_query_rewrite_enabled", False)
+    monkeypatch.setattr(settings, "rag_query_rewrite_max_chars", 500)
     return collection_name
 
 
@@ -133,6 +135,62 @@ def test_no_hits_returns_no_evidence_without_calling_llm(monkeypatch) -> None:  
     assert data["answer"] == rag_service.NO_EVIDENCE_ANSWER
     assert data["sources"] == []
     assert data["memory_sources"] == []
+
+
+def test_query_rewrite_uses_rewritten_query_for_retrieval(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _ready_indexed_document(monkeypatch, content=b"canonical retrieval token")
+    monkeypatch.setattr(settings, "rag_query_rewrite_enabled", True)
+    captured: dict[str, list[dict[str, str]]] = {}
+
+    @dataclass
+    class RewriteProvider:
+        @property
+        def info(self) -> ChatProviderInfo:
+            return ChatProviderInfo(provider="fake", model=settings.openai_model, configured=True)
+
+        def complete(self, messages):  # type: ignore[no-untyped-def]
+            prompt = "\n".join(message["content"] for message in messages)
+            if "Rewrite the user's question" in messages[0]["content"]:
+                return ChatCompletionResult(content="canonical retrieval token", model=settings.openai_model, provider="fake")
+            captured["messages"] = messages
+            return ChatCompletionResult(content="Answer with 【1】.", model=settings.openai_model, provider="fake")
+
+    monkeypatch.setattr(rag_service, "get_chat_provider", lambda: RewriteProvider())
+
+    response = _rag({"query": "vague question"})
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["query_used"] == "canonical retrieval token"
+    assert data["query_rewritten"] is True
+    assert data["sources"]
+    assert "vague question" in captured["messages"][1]["content"]
+
+
+def test_query_rewrite_failure_falls_back_to_original_query(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _ready_indexed_document(monkeypatch, content=b"fallback original token")
+    monkeypatch.setattr(settings, "rag_query_rewrite_enabled", True)
+
+    @dataclass
+    class FailingRewriteProvider:
+        @property
+        def info(self) -> ChatProviderInfo:
+            return ChatProviderInfo(provider="fake", model=settings.openai_model, configured=True)
+
+        def complete(self, messages):  # type: ignore[no-untyped-def]
+            if "Rewrite the user's question" in messages[0]["content"]:
+                raise RuntimeError("rewrite failed")
+            return ChatCompletionResult(content="Answer with 【1】.", model=settings.openai_model, provider="fake")
+
+    monkeypatch.setattr(rag_service, "get_chat_provider", lambda: FailingRewriteProvider())
+
+    response = _rag({"query": "fallback original token"})
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["query_used"] == "fallback original token"
+    assert data["query_rewritten"] is False
+    assert data["sources"]
 
 
 def test_include_memory_false_does_not_search_or_inject_memory(monkeypatch) -> None:  # type: ignore[no-untyped-def]
